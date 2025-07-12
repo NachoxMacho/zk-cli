@@ -15,7 +15,8 @@ import (
 const cmdList = "zk.list"
 
 type cmdListOpts struct {
-	Select []string `json:"select"`
+	Select  []string `json:"select"`
+	Aliases bool     `json:"aliases"`
 	cli.Filtering
 }
 
@@ -50,6 +51,28 @@ func executeCommandList(logger util.Logger, notebook *core.Notebook, args []inte
 	listNotes := []listNote{}
 	for _, note := range notes {
 		listNotes = append(listNotes, newListNote(note, selection, notebook.Path))
+	}
+	if opts.Aliases {
+		for _, note := range notes {
+			aliases, ok := note.Metadata["aliases"]
+			if !ok {
+				continue
+			}
+			switch aliases := aliases.(type) {
+			case []any:
+				oldTitle := note.Title
+				for _, alias := range aliases {
+					note.Title = fmt.Sprint(alias)
+					listNotes = append(listNotes, newListNote(note, selection, notebook.Path))
+				}
+				note.Title = oldTitle
+			case string:
+				oldTitle := note.Title
+				note.Title = fmt.Sprint(aliases)
+				listNotes = append(listNotes, newListNote(note, selection, notebook.Path))
+				note.Title = oldTitle
+			}
+		}
 	}
 
 	return listNotes, nil
