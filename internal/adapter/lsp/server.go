@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/zk-org/zk/internal/core"
-	"github.com/zk-org/zk/internal/util"
-	"github.com/zk-org/zk/internal/util/errors"
-	"github.com/zk-org/zk/internal/util/opt"
-	strutil "github.com/zk-org/zk/internal/util/strings"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	glspserv "github.com/tliron/glsp/server"
 	"github.com/tliron/kutil/logging"
 	_ "github.com/tliron/kutil/logging/simple"
+	"github.com/zk-org/zk/internal/core"
+	"github.com/zk-org/zk/internal/util"
+	"github.com/zk-org/zk/internal/util/errors"
+	"github.com/zk-org/zk/internal/util/opt"
+	strutil "github.com/zk-org/zk/internal/util/strings"
 )
 
 // Server holds the state of the Language Server.
@@ -111,6 +112,7 @@ func NewServer(opts ServerOpts) *Server {
 			Commands: []string{
 				cmdIndex,
 				cmdNew,
+				cmdLink,
 				cmdList,
 				cmdTagList,
 			},
@@ -568,6 +570,35 @@ type Note struct {
 	URI protocol.DocumentUri
 }
 
+func inBraces(line string, start int, end int) bool {
+
+	lastOpenIndex := strings.LastIndex(line[0:start], "[")
+	lastCloseIndex := strings.LastIndex(line[0:start], "]")
+
+	// If there's no opening brace then we can't be inside braces
+	if lastOpenIndex == -1 {
+		return false
+	}
+
+	if lastOpenIndex <= lastCloseIndex {
+		return false
+	}
+
+	firstOpenIndex := strings.Index(line[end:], "[")
+	firstCloseIndex := strings.Index(line[end:], "]")
+
+	// If there's no closing brace then we can't be inside braces
+	if firstCloseIndex == -1 {
+		return false
+	}
+
+	if firstOpenIndex <= firstCloseIndex && firstOpenIndex >= 0 {
+		return false
+	}
+
+	return true
+}
+
 func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyFunc, delay bool) {
 	if doc.NeedsRefreshDiagnostics { // Already refreshing
 		return
@@ -580,7 +611,10 @@ func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyF
 	}
 
 	diagConfig := notebook.Config.LSP.Diagnostics
-	if diagConfig.WikiTitle == core.LSPDiagnosticNone && diagConfig.DeadLink == core.LSPDiagnosticNone {
+	if diagConfig.WikiTitle == core.LSPDiagnosticNone &&
+		diagConfig.DeadLink == core.LSPDiagnosticNone &&
+		diagConfig.MissingLink == core.LSPDiagnosticNone &&
+		diagConfig.OrphanNote == core.LSPDiagnosticNone {
 		// No diagnostic enabled.
 		return
 	}
@@ -633,12 +667,89 @@ func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyF
 			})
 		}
 
+		severity := protocol.DiagnosticSeverity(diagConfig.MissingLink)
+		relPath, err := notebook.RelPath(doc.Path)
+		if err != nil {
+			s.logger.Err(err)
+			return
+		}
+
+		notes, err := notebook.FindNotes(core.NoteFindOpts{
+			MentionedBy: []string{relPath},
+		})
+		if err != nil {
+			s.logger.Err(err)
+			return
+		}
+
+		lines := doc.GetLines()
+
+		if len(notes) == 0 {
+			diagnostics = append(diagnostics, protocol.Diagnostic{
+				Severity: &severity,
+				Source:   stringPtr("zk"),
+				Message:  "Orphan note " + doc.Path,
+			})
+		}
+
+		type T struct {
+			Regex *regexp.Regexp
+			Note  core.ContextualNote
+		}
+
+		lineTerms := make([]T, 0, len(notes))
+
+		for _, n := range notes {
+			if len(n.Snippets) == 0 {
+				continue
+			}
+			matches := noteTermRegex.FindStringSubmatch(n.Snippets[0])
+			term := matches[1]
+			r, err := regexp.Compile(regexp.QuoteMeta(term))
+			if err != nil {
+				s.logger.Err(err)
+			}
+			lineTerms = append(lineTerms, T{Regex: r, Note: n})
+		}
+		for lineIndex, line := range lines {
+			for _, term := range lineTerms {
+				for _, match := range term.Regex.FindAllStringIndex(line, -1) {
+					if linkWithinInlineCode(line, match[0], match[1], insideInline) {
+						continue
+					}
+					if inBraces(line, match[0], match[1]) {
+						continue
+					}
+					start := strutil.ByteIndexToRuneIndex(line, match[0])
+					end := strutil.ByteIndexToRuneIndex(line, match[1])
+
+					diagnostics = append(diagnostics, protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{
+								Line:      protocol.UInteger(lineIndex),
+								Character: protocol.UInteger(start),
+							},
+							End: protocol.Position{
+								Line:      protocol.UInteger(lineIndex),
+								Character: protocol.UInteger(end),
+							},
+						},
+						Severity: &severity,
+						Source:   stringPtr("zk"),
+						Message:  "Link to " + term.Note.Title + " missing",
+					})
+				}
+			}
+		}
+
 		go notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 			URI:         doc.URI,
 			Diagnostics: diagnostics,
 		})
 	}()
 }
+
+var noteTermRegex = regexp.MustCompile(`<zk:match>(.*?)</zk:match>`)
 
 // buildInvokedCompletionList builds the completion item response for a
 // completion started automatically when typing an identifier, or manually.
@@ -757,10 +868,10 @@ func (s *Server) buildLinkCompletionList(notebook *core.Notebook, doc *document,
 		case []any:
 			for _, alias := range aliases {
 				noteTemp := core.MinimalNote{
-					ID: note.ID,
+					ID:       note.ID,
 					Metadata: note.Metadata,
-					Path: note.Path,
-					Title: fmt.Sprint(alias),
+					Path:     note.Path,
+					Title:    fmt.Sprint(alias),
 				}
 
 				item, err := s.newCompletionItem(notebook, noteTemp, doc, position, linkFormatter, templates)
@@ -771,14 +882,14 @@ func (s *Server) buildLinkCompletionList(notebook *core.Notebook, doc *document,
 				items = append(items, item)
 			}
 		case string:
-				noteTemp := core.MinimalNote{
-					ID: note.ID,
-					Metadata: note.Metadata,
-					Path: note.Path,
-					Title: fmt.Sprint(aliases),
-				}
+			noteTemp := core.MinimalNote{
+				ID:       note.ID,
+				Metadata: note.Metadata,
+				Path:     note.Path,
+				Title:    fmt.Sprint(aliases),
+			}
 
-				item, err := s.newCompletionItem(notebook, noteTemp, doc, position, linkFormatter, templates)
+			item, err := s.newCompletionItem(notebook, noteTemp, doc, position, linkFormatter, templates)
 			if err != nil {
 				s.logger.Err(err)
 				continue

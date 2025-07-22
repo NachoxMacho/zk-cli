@@ -70,6 +70,7 @@ func NewDefaultConfig() Config {
 			Diagnostics: LSPDiagnosticConfig{
 				WikiTitle: LSPDiagnosticNone,
 				DeadLink:  LSPDiagnosticError,
+				MissingLink: LSPDiagnosticWarning,
 			},
 		},
 		Filters: map[string]string{},
@@ -198,6 +199,8 @@ type LSPCompletionTemplates struct {
 type LSPDiagnosticConfig struct {
 	WikiTitle LSPDiagnosticSeverity
 	DeadLink  LSPDiagnosticSeverity
+	MissingLink LSPDiagnosticSeverity
+	OrphanNote LSPDiagnosticSeverity
 }
 
 type LSPDiagnosticSeverity int
@@ -442,6 +445,18 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 			return config, wrap(err)
 		}
 	}
+	if lspDiags.MissingLink != nil {
+		config.LSP.Diagnostics.MissingLink, err = lspDiagnosticSeverityFromString(*lspDiags.MissingLink)
+		if err != nil {
+			return config, wrap(err)
+		}
+	}
+	if lspDiags.OrphanNote != nil {
+		config.LSP.Diagnostics.OrphanNote, err = lspDiagnosticSeverityFromString(*lspDiags.OrphanNote)
+		if err != nil {
+			return config, wrap(err)
+		}
+	}
 
 	// Filters
 	if tomlConf.Filters != nil {
@@ -582,6 +597,8 @@ type tomlLSPConfig struct {
 	Diagnostics struct {
 		WikiTitle *string `toml:"wiki-title"`
 		DeadLink  *string `toml:"dead-link"`
+		MissingLink *string `toml:"missing-link"`
+		OrphanNote *string `toml:"orphan-note"`
 	}
 }
 
