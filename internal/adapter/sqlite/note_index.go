@@ -193,7 +193,7 @@ func (ni *NoteIndex) linkMatchesPath(link core.ResolvedLink, path string) (bool,
 	}
 
 	baseDir := filepath.Join(ni.notebookPath, filepath.Dir(link.SourcePath))
-	if relHref, err := ni.relNotebookPath(baseDir, href); err != nil {
+	if relHref, err := ni.relNotebookPath(baseDir, href); err == nil {
 		if matches(relHref, false) {
 			return true, nil
 		}
