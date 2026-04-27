@@ -9,6 +9,12 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 ### Added
 
+### Fixed
+
+## 0.15.3
+
+### Added
+
 - `zk config --list <object>` (by @andrebauer, 484)
 
 ### Fixed
