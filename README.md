@@ -118,6 +118,12 @@ official repos.
 sudo pacman -S zk
 ```
 
+### MacPorts
+
+```sh
+sudo port install zk
+```
+
 ### Build from scratch
 
 Make sure you have a working [Go 1.21+ installation](https://golang.org/), then
