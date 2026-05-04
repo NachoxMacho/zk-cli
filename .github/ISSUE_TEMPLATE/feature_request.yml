@@ -10,11 +10,11 @@ body:
       label: Description, Motivation and Use Case
       description: Summarise the feature. Why should it be implemented? What problem does it solve? What value does it bring? How would it help users?
 
-  # - type: checkboxes
-  #   id: ownership
-  #   attributes:
-  #     label: Ownership
-  #     description: Do I plan to submit a PR for this feature?
-  #     options:
-  #       - label: No
-  #       - label: Yes
+  - type: checkboxes
+    id: ownership
+    attributes:
+      label: Ownership
+      description: Do I plan to submit a PR for this feature?
+      options:
+        - label: No
+        - label: Yes
