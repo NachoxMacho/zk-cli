@@ -1,12 +1,23 @@
-name: Feature request
-description: Suggest an idea for this project.
+name: Feature Request
+description: Suggest a new feature or enhancement for this project.
+title: "[Feature] "
+labels:
+  - feature request
 body:
-  - type: markdown
-    attributes:
-      value: |
-        If you have an idea, _please [open as a discussion](https://github.com/zk-org/zk/discussions/new?category=ideas)_ instead of an issue. This helps keep the issue tracker more relavent.
-        Be aware that feature requests [may not get much attention through 2025!](https://github.com/zk-org/zk/discussions/486)
   - type: textarea
+    id: description
     attributes:
-      label: Exception
-      placeholder: If you're not going to open a discussion instead, briefly explain why.
+      label: Description, Motivation and Use Case
+      description: Summarise the feature. Why should it be implemented? What problem does it solve? What value does it bring? How would it help users?
+
+  - type: checkboxes
+    id: ownership
+    attributes:
+      label: Ownership
+      description: Do I plan to submit a PR for this feature?
+      validations: 
+        required: true
+      options:
+        - label: No
+        - label: Yes
+
