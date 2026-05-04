@@ -1,3 +1,4 @@
+---
 name: Feature Request
 description: Suggest a new feature or enhancement for this project.
 title: "[Feature] "
@@ -15,9 +16,8 @@ body:
     attributes:
       label: Ownership
       description: Do I plan to submit a PR for this feature?
-      validations: 
+      validations:
         required: true
       options:
         - label: No
         - label: Yes
-
