@@ -11,6 +11,13 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 ### Fixed
 
+
+## 0.15.4
+
+### Fixed
+
+- "jump to definition" follows wrong link (by @WhyNotHugo, 703)
+
 ## 0.15.3
 
 ### Added
