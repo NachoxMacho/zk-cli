@@ -1,4 +1,4 @@
-# LSP configuration
+# LSP
 
 The `[lsp]` [configuration file](config.md) section provides settings to
 fine-tune the [LSP editors integration](../tips/editors-integration.md).

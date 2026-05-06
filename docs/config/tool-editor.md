@@ -1,4 +1,4 @@
-# Setting your default editor
+# Editor
 
 `zk` is not a text editor. Instead, it is designed to interface with your
 favorite editor to write your notes.

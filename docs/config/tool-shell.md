@@ -1,4 +1,4 @@
-# Setting your default shell
+# Shell
 
 This is _currently_ not supported on Windows (that defaults always to `cmd`).
 

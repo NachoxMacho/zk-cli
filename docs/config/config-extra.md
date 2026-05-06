@@ -1,4 +1,4 @@
-# Extra user variables
+# Extra
 
 `zk` is opened for template context extension which can be useful when
 [creating new notes](../notes/note-creation.md), for example:

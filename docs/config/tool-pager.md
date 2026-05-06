@@ -1,4 +1,4 @@
-# Setting your default pager
+# Pager
 
 When `zk`'s output exceeds a certain limit, it is automatically paginated by
 your system pager. By default, `less` is used but you may set up your own pager
