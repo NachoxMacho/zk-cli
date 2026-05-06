@@ -48,5 +48,4 @@ venv.bak/
 # LSP config files
 pyrightconfig.json
 
-# Docs site builds
-site/
+docs/version.txt

@@ -1,9 +1,9 @@
-# Global notebook
+# Notebook configuration
 
-A `[notebook]` section can be added to the [configuration file](config.md) to
-set a global notebook directory.
-
-`~` and environment variables will be expanded.
+The `[notebook]` section from the [configuration file](config.md) is used to set
+the default notebook directory. If the path starts with `~` it will be replaced
+with the user home directory (`$HOME`). This property also supports environment
+variables.
 
 ```toml
 [notebook]
@@ -14,8 +14,4 @@ The following properties are customizable:
 
 - `dir` (string)
   - Path of the default notebook.
-  - Only available in the global config file (`$ZK_CONFIG_DIR/config.toml` or
-    `$XDG_CONFIG_HOME/zk/config.toml`).
-
-The global notebook can also be set via the
-[environment variable `$ZK_NOTEBOOK_DIR`](../notes/notebook.md).
+  - Only available in the global config file (`$ZK_CONFIG_DIR/config.toml` or `$XDG_CONFIG_HOME/zk/config.toml`).

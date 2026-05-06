@@ -1,4 +1,4 @@
-# Filter
+# Named filter
 
 A named filter is a set of [note filtering options](../notes/note-filtering.md)
 used frequently together, declared in the [configuration file](config.md).

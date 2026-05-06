@@ -1,4 +1,4 @@
-# Alias
+# Command aliases
 
 A command alias is a custom `zk` command which can run another `zk` command or
 an external program.
