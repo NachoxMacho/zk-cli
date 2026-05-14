@@ -325,7 +325,7 @@ func NewServer(opts ServerOpts) *Server {
 			return nil, err
 		}
 
-		if isTrue(clientCapabilities.TextDocument.Definition.LinkSupport) {
+		if definitionLinkSupport(clientCapabilities) {
 			return protocol.LocationLink{
 				OriginSelectionRange: &link.Range,
 				TargetURI:            target.URI,
@@ -934,6 +934,11 @@ func boolPtr(v bool) *bool {
 
 func isTrue(v *bool) bool {
 	return v != nil && *v
+}
+
+// definitionLinkSupport reports whether the client advertised textDocument.definition.linkSupport=true.
+func definitionLinkSupport(caps protocol.ClientCapabilities) bool {
+	return caps.TextDocument != nil && caps.TextDocument.Definition != nil && isTrue(caps.TextDocument.Definition.LinkSupport)
 }
 
 func stringPtr(v string) *string {
