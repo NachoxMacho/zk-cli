@@ -19,6 +19,8 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 - Paths with `~` and env variables no longer error when passed to
   `--notebook-dir` and `--working-dir` (by @tjex, 732)
+- Guard LSP against unnecessary erroring on missing textDocument/definition
+  capabilities (by @SAY-5, 718)
 
 ## 0.15.4
 
