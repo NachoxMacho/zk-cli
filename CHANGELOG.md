@@ -9,6 +9,13 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 ### Added
 
+### Fixed
+
+
+## 0.15.5
+
+### Added
+
 - List, edit and filter for broken links with `--broken-links` (by
   @WhyNotHugo, 708)
 - Update strftime package, supporting `%g` and `%G` formats in the
