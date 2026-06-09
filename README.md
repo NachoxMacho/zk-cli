@@ -19,8 +19,6 @@ video,
 
 ### Highlights
 
-> Note: Links in the below list are outbound ↗
-
 - [Creating notes from templates](https://zk-org.github.io/zk/notes/note-creation.html)
 - [Advanced search and filtering capabilities](https://zk-org.github.io/zk/notes/note-filtering.html)
   including [tags](https://zk-org.github.io/zk/notes/tags.html), links and
