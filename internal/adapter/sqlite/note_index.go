@@ -187,23 +187,11 @@ func (ni *NoteIndex) batchFixExistingLinks(dao *dao, ids []core.NoteID, paths []
 	// Update the links in parallel: we must parse through the links of all notes,
 	// which is a considerable amount of work. We do so without using all CPU cores at once.
 	maxWorkers := min(max(runtime.GOMAXPROCS(0)-2, 1), len(links))
-	linksPerWorker := len(links) / maxWorkers
 	group := new(errgroup.Group)
-	for wid := range maxWorkers {
-		start := linksPerWorker * wid
-		end := linksPerWorker * (wid + 1)
-		if wid == maxWorkers-1 {
-			// The last worker does a bit more work
-			end += len(links) % maxWorkers
-		}
+	group.SetLimit(maxWorkers)
+	for _, link := range links {
 		group.Go(func() error {
-			for _, link := range links[start:end] {
-				err := fixLink(link)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+			return fixLink(link)
 		})
 	}
 	return group.Wait()
