@@ -11,6 +11,8 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 ### Fixed
 
+- Indexing made significantly more performant (by @Keluaa, 735)
+
 
 ## 0.15.5
 
