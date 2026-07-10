@@ -8,7 +8,6 @@ require (
 	github.com/aymerick/raymond v2.0.2+incompatible
 	github.com/bmatcuk/doublestar/v4 v4.0.2
 	github.com/fatih/color v1.13.0
-	github.com/go-testfixtures/testfixtures/v3 v3.6.1
 	github.com/google/go-cmp v0.5.8
 	github.com/gosimple/slug v1.12.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
@@ -28,6 +27,7 @@ require (
 	github.com/zk-org/pretty v0.2.4
 	golang.org/x/sync v0.18.0
 	gopkg.in/djherbis/times.v1 v1.3.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
