@@ -148,6 +148,7 @@ func TestParseComplete(t *testing.T) {
 		use-additional-text-edits = true
 		note-label = "notelabel"
 		note-filter-text = "notefiltertext"
+		note-filter = "--tag project"
 		note-detail = "notedetail"
 		
 		[lsp.diagnostics]
@@ -266,6 +267,7 @@ func TestParseComplete(t *testing.T) {
 					FilterText: opt.NewString("notefiltertext"),
 					Detail:     opt.NewString("notedetail"),
 				},
+				NoteFilter:             opt.NewString("--tag project"),
 				UseAdditionalTextEdits: opt.True,
 			},
 			Diagnostics: LSPDiagnosticConfig{
