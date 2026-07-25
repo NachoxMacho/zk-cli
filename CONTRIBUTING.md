@@ -130,21 +130,17 @@ Once merged to main, the site will be build and deployed.
 
 ## Releasing a new version
 
-When `zk` is ready to be released, follow these steps in order:
+Once you're ready for a new relase, complete the following steps in order:
 
-1. Update the `CHANGELOG.md`
-   ([for example](https://github.com/zk-org/zk/commit/ea4457ad671aa85a6b15747460c6f2c9ad61bf73)).
-2. Commit the changes above with `git commit` (no `-m`). In the first line of
-   the commit, provide "Release <the-version>". List any necessary detail on
-   subsequent lines.
-3. Finally, create a new Git version tag with `git tag -a <version>`(syntax
-   example: `v0.13.0`). Make sure you follow the
+1. Create a merge request from `dev` to `main`, titled "Release v<version>". Be
+   sure it passes CI and complete the merge.
+2. Pull the latest changes of `main` locally. Then create a new version tag with
+   `git tag -a <version>`(syntax example: `v0.13.0`). Make sure you follow the
    [Semantic Versioning](https://semver.org) scheme.
-
-If you create the git tag via the command line, and push it (`git push --tags`), then the
-[release action](.github/workflows/release.yml) will be triggered. This in turn
-calls the [build-binaries action](.github/workflows/build-binaries.yml), creates
-a _draft_ release on GitHub and attaches the built binaries.
+3. Push the tag (`git push --tags`). This will trigger the
+   [release action](.github/workflows/release.yml). This in turn calls the
+   [build-binaries action](.github/workflows/build-binaries.yml), creates a
+   _draft_ release on GitHub and attaches the built binaries.
 
 Alternatively, you can manually create a release via the GitHub interface, also
 creating a release tag. Then you would run the
@@ -156,8 +152,8 @@ created (i.e, adding or editing the changelog).
 
 ## Benchmarks
 
-Use `make testdata` to generate test notes in `testdata`, usable for
-reproducing test benchmarks on a notebook with 3k notes and ~15k links.
+Use `make testdata` to generate test notes in `testdata`, usable for reproducing
+test benchmarks on a notebook with 3k notes and ~15k links.
 
 When testing indexing or similar processes, be sure to test two approaches:
 
