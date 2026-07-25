@@ -132,12 +132,14 @@ Once merged to main, the site will be build and deployed.
 
 Once you're ready for a new relase, complete the following steps in order:
 
-1. Create a merge request from `dev` to `main`, titled "Release v<version>". Be
+1. Be sure you have the latest commits on `dev`. Then insert the version heading
+   for the new version in `CHANGELOG.md`, commit and push.
+2. Create a merge request from `dev` to `main`, titled "Release v<version>". Be
    sure it passes CI and complete the merge.
-2. Pull the latest changes of `main` locally. Then create a new version tag with
+3. Pull the latest changes of `main` locally. Then create a new version tag with
    `git tag -a <version>`(syntax example: `v0.13.0`). Make sure you follow the
    [Semantic Versioning](https://semver.org) scheme.
-3. Push the tag (`git push --tags`). This will trigger the
+4. Push the tag (`git push --tags`). This will trigger the
    [release action](.github/workflows/release.yml). This in turn calls the
    [build-binaries action](.github/workflows/build-binaries.yml), creates a
    _draft_ release on GitHub and attaches the built binaries.

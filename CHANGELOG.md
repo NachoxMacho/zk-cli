@@ -7,6 +7,8 @@ Format: `<description> (by <contributor>, <pr number>)`
 
 ## Unreleased
 
+## 0.15.6
+
 ### Added
 
 - Parse links to notes in frontmatter (by @tjex, 710)
