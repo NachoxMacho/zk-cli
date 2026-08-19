@@ -13,5 +13,7 @@ Tips
    editors-integration
    future-proof
    static-sites
+   graph-visualization
    style
+   modification-date
 

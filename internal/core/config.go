@@ -2,12 +2,12 @@ package core
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	toml "github.com/pelletier/go-toml"
-	"github.com/zk-org/zk/internal/util/errors"
 	"github.com/zk-org/zk/internal/util/opt"
 	"github.com/zk-org/zk/internal/util/paths"
 )
@@ -25,7 +25,7 @@ type Config struct {
 	Extra    map[string]string
 }
 
-// NOTE: config generation occurs in core.Init. The below function is used
+// NOTE: config generation occurs in internal/core/notebook_store.go. The below function is used
 // for test cases and as a program level default if the user conf is missing or
 // has values missing.
 
@@ -57,6 +57,10 @@ func NewDefaultConfig() Config {
 				LinkFormat:        "markdown",
 				LinkEncodePath:    true,
 				LinkDropExtension: true,
+				Frontmatter: YamlFrontmatterConfig{
+					CreationDate:     "date",
+					ModificationDate: "modified",
+				},
 			},
 		},
 		LSP: LSPConfig{
@@ -68,9 +72,10 @@ func NewDefaultConfig() Config {
 				},
 			},
 			Diagnostics: LSPDiagnosticConfig{
-				WikiTitle: LSPDiagnosticNone,
-				DeadLink:  LSPDiagnosticError,
-				MissingLink: LSPDiagnosticWarning,
+				WikiTitle:       LSPDiagnosticNone,
+				DeadLink:        LSPDiagnosticError,
+				MissingLink:     LSPDiagnosticWarning,
+				MissingBacklink: MissingBacklinkConfig{}, // Disabled by default (Level = LSPDiagnosticNone)
 			},
 		},
 		Filters: map[string]string{},
@@ -122,7 +127,7 @@ func (c Config) GroupNameForPath(path string) (string, error) {
 		for _, groupPath := range config.Paths {
 			matches, err := doublestar.Match(groupPath, path)
 			if err != nil {
-				return "", errors.Wrapf(err, "failed to match group %s to %s", name, path)
+				return "", fmt.Errorf("failed to match group %s to %s: %w", name, path, err)
 			} else if matches {
 				// Early return if an exact match
 				return name, nil
@@ -162,6 +167,18 @@ type MarkdownConfig struct {
 	LinkEncodePath bool
 	// Indicates whether a link's path file extension will be removed.
 	LinkDropExtension bool
+
+	// Frontmatter determines the keys used in the frontmatter
+	Frontmatter YamlFrontmatterConfig
+}
+
+// YamlFrontmatterConfig holds the configuration for Yaml frontmatter.
+type YamlFrontmatterConfig struct {
+	// CreationDate is the key for the creation date has. Default is "date".
+	CreationDate string
+	// ModificationDate is the key for the modification date has. Default is
+	// "modified".
+	ModificationDate string
 }
 
 // ToolConfig holds the external tooling configuration.
@@ -184,10 +201,11 @@ type LSPConfig struct {
 // LSPCompletionConfig holds the LSP auto-completion configuration.
 type LSPCompletionConfig struct {
 	Note                   LSPCompletionTemplates
+	NoteFilter             opt.String
 	UseAdditionalTextEdits opt.Bool
 }
 
-// LSPCompletionConfig holds the LSP completion templates for a particular
+// LSPCompletionTemplates holds the LSP completion templates for a particular
 // completion item type (e.g. note or tag).
 type LSPCompletionTemplates struct {
 	Label      opt.String
@@ -197,10 +215,20 @@ type LSPCompletionTemplates struct {
 
 // LSPDiagnosticConfig holds the LSP diagnostics configuration.
 type LSPDiagnosticConfig struct {
-	WikiTitle LSPDiagnosticSeverity
-	DeadLink  LSPDiagnosticSeverity
-	MissingLink LSPDiagnosticSeverity
-	OrphanNote LSPDiagnosticSeverity
+	WikiTitle       LSPDiagnosticSeverity
+	DeadLink        LSPDiagnosticSeverity
+	MissingLink     LSPDiagnosticSeverity
+	OrphanNote      LSPDiagnosticSeverity
+	SelfLink        LSPDiagnosticSeverity
+	MissingBacklink MissingBacklinkConfig
+}
+
+// IsEnabled returns true if at least one diagnostic is enabled.
+func (c LSPDiagnosticConfig) IsEnabled() bool {
+	return c.WikiTitle != LSPDiagnosticNone ||
+		c.DeadLink != LSPDiagnosticNone ||
+		c.SelfLink != LSPDiagnosticNone ||
+		c.MissingBacklink.Level != LSPDiagnosticNone
 }
 
 type LSPDiagnosticSeverity int
@@ -212,6 +240,20 @@ const (
 	LSPDiagnosticInfo    LSPDiagnosticSeverity = 3
 	LSPDiagnosticHint    LSPDiagnosticSeverity = 4
 )
+
+type LSPDiagnosticPosition int
+
+const (
+	LSPDiagnosticPositionTop LSPDiagnosticPosition = iota + 1
+	LSPDiagnosticPositionBottom
+	LSPDiagnosticPositionLastSection
+)
+
+// MissingBacklinkConfig holds the configuration for missing backlink diagnostics.
+type MissingBacklinkConfig struct {
+	Level    LSPDiagnosticSeverity
+	Position LSPDiagnosticPosition
+}
 
 // NotebookConfig holds configuration about the default notebook
 type NotebookConfig struct {
@@ -267,9 +309,7 @@ func (c GroupConfig) Clone() GroupConfig {
 	copy(clone.Paths, c.Paths)
 
 	clone.Extra = make(map[string]string)
-	for k, v := range c.Extra {
-		clone.Extra[k] = v
-	}
+	maps.Copy(clone.Extra, c.Extra)
 	return clone
 }
 
@@ -284,7 +324,7 @@ func OpenConfig(path string, parentConfig Config, fs FileStorage, isGlobal bool)
 
 	content, err := fs.Read(path)
 	if err != nil {
-		return parentConfig, errors.Wrapf(err, "failed to open config file at %s", path)
+		return parentConfig, fmt.Errorf("failed to open config file at %s: %w", path, err)
 	}
 
 	return ParseConfig(content, path, parentConfig, isGlobal)
@@ -296,14 +336,12 @@ func OpenConfig(path string, parentConfig Config, fs FileStorage, isGlobal bool)
 //
 // The parentConfig will be used to inherit default config settings.
 func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool) (Config, error) {
-	wrap := errors.Wrapperf("failed to read config")
-
 	config := parentConfig
 
 	var tomlConf tomlConfig
 	err := toml.Unmarshal(content, &tomlConf)
 	if err != nil {
-		return config, wrap(err)
+		return config, fmt.Errorf("failed to read config: %w", err)
 	}
 
 	// Notebook
@@ -312,7 +350,7 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 		if isGlobal {
 			config.Notebook.Dir = opt.NewNotEmptyString(notebook.Dir)
 		} else {
-			return config, wrap(errors.New("notebook.dir should not be set on local configuration"))
+			return config, fmt.Errorf("notebook.dir should not be set on local configuration")
 		}
 	}
 
@@ -327,7 +365,7 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 	if note.Template != "" {
 		expanded, err := paths.ExpandPath(note.Template)
 		if err != nil {
-			return config, wrap(err)
+			return config, fmt.Errorf("failed to expand template path from config: %w", err)
 		}
 		config.Note.BodyTemplatePath = opt.NewNotEmptyString(expanded)
 	}
@@ -346,16 +384,10 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 	if note.DefaultTitle != "" {
 		config.Note.DefaultTitle = note.DefaultTitle
 	}
-	for _, v := range note.Exclude {
-		config.Note.Exclude = append(config.Note.Exclude, v)
-	}
-	for _, v := range note.Ignore {
-		config.Note.Exclude = append(config.Note.Exclude, v)
-	}
+	config.Note.Exclude = append(config.Note.Exclude, note.Exclude...)
+	config.Note.Exclude = append(config.Note.Exclude, note.Ignore...)
 	if tomlConf.Extra != nil {
-		for k, v := range tomlConf.Extra {
-			config.Extra[k] = v
-		}
+		maps.Copy(config.Extra, tomlConf.Extra)
 	}
 
 	// Groups
@@ -394,6 +426,21 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 		config.Format.Markdown.LinkDropExtension = *markdown.LinkDropExtension
 	}
 
+	// Frontmatter
+	frontmatter := markdown.Frontmatter
+	if frontmatter.CreationDate != nil && *frontmatter.CreationDate == "" {
+		*frontmatter.CreationDate = "date"
+	}
+	if frontmatter.CreationDate != nil {
+		config.Format.Markdown.Frontmatter.CreationDate = *frontmatter.CreationDate
+	}
+	if frontmatter.ModificationDate != nil && *frontmatter.ModificationDate == "" {
+		frontmatter.ModificationDate = nil
+	}
+	if frontmatter.ModificationDate != nil {
+		config.Format.Markdown.Frontmatter.ModificationDate = *frontmatter.ModificationDate
+	}
+
 	// Tool
 	tool := tomlConf.Tool
 	if tool.Editor != nil {
@@ -429,6 +476,9 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 	if lspCompl.NoteDetail != nil {
 		config.LSP.Completion.Note.Detail = opt.NewNotEmptyString(*lspCompl.NoteDetail)
 	}
+	if lspCompl.NoteFilter != nil {
+		config.LSP.Completion.NoteFilter = opt.NewNotEmptyString(*lspCompl.NoteFilter)
+	}
 	config.LSP.Completion.UseAdditionalTextEdits = opt.NewBoolWithPtr(lspCompl.UseAdditionalTextEdits)
 
 	// LSP diagnostics
@@ -436,13 +486,29 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 	if lspDiags.WikiTitle != nil {
 		config.LSP.Diagnostics.WikiTitle, err = lspDiagnosticSeverityFromString(*lspDiags.WikiTitle)
 		if err != nil {
-			return config, wrap(err)
+			return config, fmt.Errorf("failed to parse wikititle level: %w", err)
 		}
 	}
 	if lspDiags.DeadLink != nil {
 		config.LSP.Diagnostics.DeadLink, err = lspDiagnosticSeverityFromString(*lspDiags.DeadLink)
 		if err != nil {
-			return config, wrap(err)
+			return config, fmt.Errorf("failed to parse deadlink level: %w", err)
+		}
+	}
+	if lspDiags.SelfLink != nil {
+		config.LSP.Diagnostics.SelfLink, err = lspDiagnosticSeverityFromString(*lspDiags.SelfLink)
+		if err != nil {
+			return config, fmt.Errorf("failed to parse deadlink level: %w", err)
+		}
+	}
+	if lspDiags.MissingBacklink != nil {
+		config.LSP.Diagnostics.MissingBacklink.Level, err = lspDiagnosticSeverityFromString(lspDiags.MissingBacklink.Level)
+		if err != nil {
+			return config, fmt.Errorf("failed to parse missing backlink level: %w", err)
+		}
+		config.LSP.Diagnostics.MissingBacklink.Position, err = lspDiagnosticPositionFromString(lspDiags.MissingBacklink.Position)
+		if err != nil {
+			return config, fmt.Errorf("failed to parse missing backlink position: %w", err)
 		}
 	}
 	if lspDiags.MissingLink != nil {
@@ -460,16 +526,12 @@ func ParseConfig(content []byte, path string, parentConfig Config, isGlobal bool
 
 	// Filters
 	if tomlConf.Filters != nil {
-		for k, v := range tomlConf.Filters {
-			config.Filters[k] = v
-		}
+		maps.Copy(config.Filters, tomlConf.Filters)
 	}
 
 	// Aliases
 	if tomlConf.Aliases != nil {
-		for k, v := range tomlConf.Aliases {
-			config.Aliases[k] = v
-		}
+		maps.Copy(config.Aliases, tomlConf.Aliases)
 	}
 
 	return config, nil
@@ -479,9 +541,7 @@ func (c GroupConfig) merge(tomlConf tomlGroupConfig, name string) GroupConfig {
 	res := c.Clone()
 
 	if tomlConf.Paths != nil {
-		for _, p := range tomlConf.Paths {
-			res.Paths = append(res.Paths, p)
-		}
+		res.Paths = append(res.Paths, tomlConf.Paths...)
 	} else {
 		// If no `paths` config property was given for this group, we assume
 		// that its name will be used as the path.
@@ -513,16 +573,10 @@ func (c GroupConfig) merge(tomlConf tomlGroupConfig, name string) GroupConfig {
 	if note.DefaultTitle != "" {
 		res.Note.DefaultTitle = note.DefaultTitle
 	}
-	for _, v := range note.Exclude {
-		res.Note.Exclude = append(res.Note.Exclude, v)
-	}
-	for _, v := range note.Ignore {
-		res.Note.Exclude = append(res.Note.Exclude, v)
-	}
+	res.Note.Exclude = append(res.Note.Exclude, note.Exclude...)
+	res.Note.Exclude = append(res.Note.Exclude, note.Ignore...)
 	if tomlConf.Extra != nil {
-		for k, v := range tomlConf.Extra {
-			res.Extra[k] = v
-		}
+		maps.Copy(res.Extra, tomlConf.Extra)
 	}
 
 	return res
@@ -569,12 +623,18 @@ type tomlFormatConfig struct {
 }
 
 type tomlMarkdownConfig struct {
-	Hashtags          *bool   `toml:"hashtags"`
-	ColonTags         *bool   `toml:"colon-tags"`
-	MultiwordTags     *bool   `toml:"multiword-tags"`
-	LinkFormat        *string `toml:"link-format"`
-	LinkEncodePath    *bool   `toml:"link-encode-path"`
-	LinkDropExtension *bool   `toml:"link-drop-extension"`
+	Hashtags          *bool                     `toml:"hashtags"`
+	ColonTags         *bool                     `toml:"colon-tags"`
+	MultiwordTags     *bool                     `toml:"multiword-tags"`
+	LinkFormat        *string                   `toml:"link-format"`
+	LinkEncodePath    *bool                     `toml:"link-encode-path"`
+	LinkDropExtension *bool                     `toml:"link-drop-extension"`
+	Frontmatter       tomlYamlFrontmatterConfig `toml:"frontmatter"`
+}
+
+type tomlYamlFrontmatterConfig struct {
+	CreationDate     *string `toml:"creation-date-key"`
+	ModificationDate *string `toml:"modification-date-key"`
 }
 
 type tomlToolConfig struct {
@@ -591,15 +651,23 @@ type tomlLSPConfig struct {
 	Completion struct {
 		NoteLabel              *string `toml:"note-label"`
 		NoteFilterText         *string `toml:"note-filter-text"`
+		NoteFilter             *string `toml:"note-filter"`
 		NoteDetail             *string `toml:"note-detail"`
 		UseAdditionalTextEdits *bool   `toml:"use-additional-text-edits"`
 	}
 	Diagnostics struct {
-		WikiTitle *string `toml:"wiki-title"`
-		DeadLink  *string `toml:"dead-link"`
-		MissingLink *string `toml:"missing-link"`
-		OrphanNote *string `toml:"orphan-note"`
+		WikiTitle       *string                    `toml:"wiki-title"`
+		DeadLink        *string                    `toml:"dead-link"`
+		MissingLink     *string                    `toml:"missing-link"`
+		OrphanNote      *string                    `toml:"orphan-note"`
+		SelfLink        *string                    `toml:"self-link"`
+		MissingBacklink *tomlMissingBacklinkConfig `toml:"missing-backlink"`
 	}
+}
+
+type tomlMissingBacklinkConfig struct {
+	Level    string `toml:"level"`
+	Position string `toml:"position"`
 }
 
 func charsetFromString(charset string) Charset {
@@ -644,5 +712,18 @@ func lspDiagnosticSeverityFromString(s string) (LSPDiagnosticSeverity, error) {
 		return LSPDiagnosticHint, nil
 	default:
 		return LSPDiagnosticNone, fmt.Errorf("%s: unknown LSP diagnostic severity - may be none, hint, info, warning or error", s)
+	}
+}
+
+func lspDiagnosticPositionFromString(s string) (LSPDiagnosticPosition, error) {
+	switch s {
+	case "top":
+		return LSPDiagnosticPositionTop, nil
+	case "bottom":
+		return LSPDiagnosticPositionBottom, nil
+	case "last-section":
+		return LSPDiagnosticPositionLastSection, nil
+	default:
+		return 0, fmt.Errorf("%s: unknown LSP diagnostic position - may be top, bottom, or last-section", s)
 	}
 }

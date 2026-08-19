@@ -37,7 +37,7 @@ func TestNotebookNewNote(t *testing.T) {
 	assert.Equal(t, test.receivedIDOpts, test.config.Note.IDOptions)
 
 	// Check that the templates received the proper render contexts.
-	assert.Equal(t, test.filenameTemplate.Contexts, []interface{}{
+	assert.Equal(t, test.filenameTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Note title",
@@ -50,7 +50,7 @@ func TestNotebookNewNote(t *testing.T) {
 			Env:          map[string]string{"KEY1": "foo", "KEY2": "bar"},
 		},
 	})
-	assert.Equal(t, test.bodyTemplate.Contexts, []interface{}{
+	assert.Equal(t, test.bodyTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Note title",
@@ -76,7 +76,7 @@ func TestNotebookNewNoteWithDefaultTitle(t *testing.T) {
 	})
 
 	assert.Nil(t, err)
-	assert.Equal(t, test.filenameTemplate.Contexts, []interface{}{
+	assert.Equal(t, test.filenameTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:    "id",
 			Title: "Titre par défaut",
@@ -120,7 +120,7 @@ func TestNotebookNewNoteInDir(t *testing.T) {
 	assert.Equal(t, test.fs.files["/notebook/a-dir/filename.ext"], "body")
 
 	// Check that the templates received the proper render contexts.
-	assert.Equal(t, test.filenameTemplate.Contexts, []interface{}{
+	assert.Equal(t, test.filenameTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Note title",
@@ -133,7 +133,7 @@ func TestNotebookNewNoteInDir(t *testing.T) {
 			Env:          map[string]string{"KEY1": "foo", "KEY2": "bar"},
 		},
 	})
-	assert.Equal(t, test.bodyTemplate.Contexts, []interface{}{
+	assert.Equal(t, test.bodyTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Note title",
@@ -196,7 +196,7 @@ func TestNotebookNewNoteInDirWithGroup(t *testing.T) {
 	assert.Equal(t, test.receivedIDOpts, groupConfig.Note.IDOptions)
 
 	// Check that the templates received the proper render contexts.
-	assert.Equal(t, filenameTemplate.Contexts, []interface{}{
+	assert.Equal(t, filenameTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Group default title",
@@ -209,7 +209,7 @@ func TestNotebookNewNoteInDirWithGroup(t *testing.T) {
 			Env:          map[string]string{"KEY1": "foo", "KEY2": "bar"},
 		},
 	})
-	assert.Equal(t, bodyTemplate.Contexts, []interface{}{
+	assert.Equal(t, bodyTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Group default title",
@@ -271,7 +271,7 @@ func TestNotebookNewNoteWithGroup(t *testing.T) {
 	assert.Equal(t, test.receivedIDOpts, groupConfig.Note.IDOptions)
 
 	// Check that the templates received the proper render contexts.
-	assert.Equal(t, filenameTemplate.Contexts, []interface{}{
+	assert.Equal(t, filenameTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Group default title",
@@ -284,7 +284,7 @@ func TestNotebookNewNoteWithGroup(t *testing.T) {
 			Env:          map[string]string{"KEY1": "foo", "KEY2": "bar"},
 		},
 	})
-	assert.Equal(t, bodyTemplate.Contexts, []interface{}{
+	assert.Equal(t, bodyTemplate.Contexts, []any{
 		newNoteTemplateContext{
 			ID:           "id",
 			Title:        "Group default title",
@@ -420,7 +420,7 @@ func (t *newNoteTest) setup() {
 
 	t.templateLoader = newTemplateLoaderMock()
 	if t.filenameTemplateRender != nil {
-		t.filenameTemplate = t.templateLoader.Spy("filename.ext", func(context interface{}) string {
+		t.filenameTemplate = t.templateLoader.Spy("filename.ext", func(context any) string {
 			return t.filenameTemplateRender(context.(newNoteTemplateContext))
 		})
 	} else {
@@ -465,10 +465,6 @@ func (t *newNoteTest) setup() {
 	}
 }
 
-func (t *newNoteTest) parseContentAsNote(content string, note *NoteContent) {
-	t.parser.results[content] = note
-}
-
 func (t *newNoteTest) run(opts NewNoteOpts) (*Note, error) {
 	notebook := NewNotebook(t.rootDir, t.config, NotebookPorts{
 		TemplateLoaderFactory: func(language string) (TemplateLoader, error) {
@@ -504,19 +500,17 @@ type noteIndexAddMock struct {
 
 func (m *noteIndexAddMock) Find(opts NoteFindOpts) ([]ContextualNote, error)     { return nil, nil }
 func (m *noteIndexAddMock) FindMinimal(opts NoteFindOpts) ([]MinimalNote, error) { return nil, nil }
-func (m *noteIndexAddMock) FindLinkMatch(baseDir string, href string, linkType LinkType) (NoteID, error) {
-	return 0, nil
-}
 func (m *noteIndexAddMock) FindLinksBetweenNotes(ids []NoteID) ([]ResolvedLink, error) {
 	return nil, nil
 }
 func (m *noteIndexAddMock) FindCollections(kind CollectionKind, sorters []CollectionSorter) ([]Collection, error) {
 	return nil, nil
 }
-func (m *noteIndexAddMock) IndexedPaths() (<-chan paths.Metadata, error)       { return nil, nil }
-func (m *noteIndexAddMock) Add(note Note) (NoteID, error)                      { return m.ReturnedID, nil }
-func (m *noteIndexAddMock) Update(note Note) error                             { return nil }
-func (m *noteIndexAddMock) Remove(path string) error                           { return nil }
-func (m *noteIndexAddMock) Commit(transaction func(idx NoteIndex) error) error { return nil }
-func (m *noteIndexAddMock) NeedsReindexing() (bool, error)                     { return false, nil }
-func (m *noteIndexAddMock) SetNeedsReindexing(needsReindexing bool) error      { return nil }
+func (m *noteIndexAddMock) IndexedPaths() (<-chan paths.Metadata, error)        { return nil, nil }
+func (m *noteIndexAddMock) Add(note Note, fixLinks bool) (NoteID, error)        { return m.ReturnedID, nil }
+func (m *noteIndexAddMock) Update(note Note) error                              { return nil }
+func (m *noteIndexAddMock) Remove(path string) error                            { return nil }
+func (m *noteIndexAddMock) BatchUpdateLinks(ids []NoteID, paths []string) error { return nil }
+func (m *noteIndexAddMock) Commit(transaction func(idx NoteIndex) error) error  { return nil }
+func (m *noteIndexAddMock) NeedsReindexing() (bool, error)                      { return false, nil }
+func (m *noteIndexAddMock) SetNeedsReindexing(needsReindexing bool) error       { return nil }

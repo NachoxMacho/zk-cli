@@ -7,12 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zk-org/zk/internal/adapter/markdown/extensions"
-	"github.com/zk-org/zk/internal/core"
-	"github.com/zk-org/zk/internal/util"
-	"github.com/zk-org/zk/internal/util/opt"
-	strutil "github.com/zk-org/zk/internal/util/strings"
-	"github.com/zk-org/zk/internal/util/yaml"
 	"github.com/mvdan/xurls"
 	"github.com/yuin/goldmark"
 	meta "github.com/yuin/goldmark-meta"
@@ -20,6 +14,12 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
+	"github.com/zk-org/zk/internal/adapter/markdown/extensions"
+	"github.com/zk-org/zk/internal/core"
+	"github.com/zk-org/zk/internal/util"
+	"github.com/zk-org/zk/internal/util/opt"
+	strutil "github.com/zk-org/zk/internal/util/strings"
+	"github.com/zk-org/zk/internal/util/yaml"
 )
 
 // Parser parses the content of Markdown notes.
@@ -43,6 +43,7 @@ func NewParser(options ParserOpts, logger util.Logger) *Parser {
 		md: goldmark.New(
 			goldmark.WithExtensions(
 				meta.Meta,
+				extension.Footnote,
 				extension.NewLinkify(
 					extension.WithLinkifyAllowedProtocols([][]byte{
 						[]byte("http:"),
@@ -84,13 +85,19 @@ func (p *Parser) ParseNoteContent(content string) (*core.NoteContent, error) {
 		return nil, err
 	}
 
+	fmLinks, err := p.parseFrontmatterLinks(frontmatter)
+	if err != nil {
+		return nil, err
+	}
+	links = append(links, fmLinks...)
+
 	title, bodyStart, err := parseTitle(frontmatter, root, bytes)
 	if err != nil {
 		return nil, err
 	}
 	body := parseBody(bodyStart, bytes)
 
-	tags, err := parseTags(frontmatter, root, bytes)
+	tags, err := parseTags(frontmatter, root)
 	if err != nil {
 		return nil, err
 	}
@@ -150,20 +157,20 @@ func parseBody(startIndex int, source []byte) opt.String {
 
 // parseLead extracts the body content until the first blank line.
 func parseLead(body opt.String) opt.String {
-	lead := ""
+	var lead strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(body.String()))
 	for scanner.Scan() {
 		if strings.TrimSpace(scanner.Text()) == "" {
 			break
 		}
-		lead += scanner.Text() + "\n"
+		lead.WriteString(scanner.Text() + "\n")
 	}
 
-	return opt.NewNotEmptyString(strings.TrimSpace(lead))
+	return opt.NewNotEmptyString(strings.TrimSpace(lead.String()))
 }
 
 // parseTags extracts tags as #hashtags, :colon:tags: or from the YAML frontmatter.
-func parseTags(frontmatter frontmatter, root ast.Node, source []byte) ([]string, error) {
+func parseTags(frontmatter frontmatter, root ast.Node) ([]string, error) {
 	tags := make([]string, 0)
 
 	// Parse from YAML frontmatter, either:
@@ -176,7 +183,7 @@ func parseTags(frontmatter frontmatter, root ast.Node, source []byte) ([]string,
 		} else if tags := frontmatter.getString(key); !tags.IsNull() {
 			// Parse a space-separated string list
 			res := []string{}
-			for _, s := range strings.Fields(tags.Unwrap()) {
+			for s := range strings.FieldsSeq(tags.Unwrap()) {
 				s = strings.TrimSpace(s)
 				if len(s) > 0 {
 					res = append(res, s)
@@ -201,9 +208,7 @@ func parseTags(frontmatter frontmatter, root ast.Node, source []byte) ([]string,
 	// Parse #hashtags and :colon:tags:
 	err := ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if tagsNode, ok := n.(*extensions.Tags); ok && entering {
-			for _, tag := range tagsNode.Tags {
-				tags = append(tags, tag)
-			}
+			tags = append(tags, tagsNode.Tags...)
 		}
 		return ast.WalkContinue, nil
 	})
@@ -272,6 +277,22 @@ func (p *Parser) parseLinks(root ast.Node, source []byte) ([]core.Link, error) {
 	return links, err
 }
 
+func (p *Parser) parseFrontmatterLinks(frontmatter frontmatter) ([]core.Link, error) {
+	links := []core.Link{}
+	for _, val := range frontmatter.values {
+		valStr := fmt.Sprint(val)
+		fmRoot := p.md.Parser().Parse(
+			text.NewReader([]byte(valStr)),
+		)
+		fmLinks, err := p.parseLinks(fmRoot, []byte(valStr))
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, fmLinks...)
+	}
+	return links, nil
+}
+
 func extractLines(n ast.Node, source []byte) (content string, start, end int) {
 	if n == nil {
 		return
@@ -295,7 +316,7 @@ func extractLines(n ast.Node, source []byte) (content string, start, end int) {
 
 // frontmatter contains metadata parsed from a YAML frontmatter.
 type frontmatter struct {
-	values map[string]interface{}
+	values map[string]any
 	start  int
 	end    int
 }
@@ -304,7 +325,7 @@ var frontmatterRegex = regexp.MustCompile(`(?ms)^\s*-+\s*$.*?^\s*-+\s*$`)
 
 func parseFrontmatter(context parser.Context, source []byte) (frontmatter, error) {
 	var front frontmatter
-	front.values = map[string]interface{}{}
+	front.values = map[string]any{}
 
 	index := frontmatterRegex.FindIndex(source)
 	if index == nil {
@@ -319,8 +340,8 @@ func parseFrontmatter(context parser.Context, source []byte) (frontmatter, error
 		return front, err
 	}
 
-	// The YAML parser parses nested maps as map[interface{}]interface{}
-	// instead of map[string]interface{}, which doesn't work with the JSON
+	// The YAML parser parses nested maps as map[any]any
+	// instead of map[string]any, which doesn't work with the JSON
 	// marshaller.
 	values = yaml.ConvertMapToJSONCompatible(values)
 
@@ -358,7 +379,7 @@ func (m frontmatter) getStrings(keys ...string) ([]string, bool) {
 	for _, key := range keys {
 		key = strings.ToLower(key)
 		if val, ok := m.values[key]; ok {
-			if val, ok := val.([]interface{}); ok {
+			if val, ok := val.([]any); ok {
 				strs := []string{}
 				for _, v := range val {
 					s := strings.TrimSpace(fmt.Sprint(v))

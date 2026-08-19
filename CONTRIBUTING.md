@@ -2,6 +2,9 @@
 
 ## Understanding the codebase
 
+We have a `dev` and `main` branch. If you are contributing, then branch from
+`dev`.
+
 ### Building the project
 
 It is recommended to use the `Makefile` for compiling the project, as the `go`
@@ -22,7 +25,7 @@ CGO_ENABLED=1 GOARCH=arm64 go build -tags "fts5" -ldflags "-X=main.Version=`git 
 - `GOARCH=arm64` is only required for Apple Silicon chips.
 - `-tags "fts5"` enables the FTS option with `mattn/go-sqlite3`, which handles
   much of the magic behind `zk`'s `--match` filtering option.
-- ``-ldflags "-X=main.Version=`git describe --tags --match v[0-9]* 2> /dev/null` -X=main.Build=`git rev-parse --short HEAD`"``
+- ``-ldflags "-X=main.Version=`git describe --tags --match v[0-9]* 2> /dev/null`"``
   will automatically set `zk`'s build and version numbers using the latest Git
   tag and commit SHA.
 
@@ -71,33 +74,6 @@ releases are created.
 - `.github/workflows/triage.yml` automatically tags old issues and PRs as
   staled.
 
-## Releasing a new version
-
-When `zk` is ready to be released, follow these steps in order:
-
-1. Update the `CHANGELOG.md`
-   ([for example](https://github.com/zk-org/zk/commit/ea4457ad671aa85a6b15747460c6f2c9ad61bf73))
-2. Update the docs version in `docs/conf.py`
-3. Commit the changes above with `git commit` (no `-m`). In the first line of
-   the commit, provide "Release <the-version>". List any necessary detail on
-   subsequent lines.
-4. Finally, create a new Git version tag with `git tag -a <version>`(syntax
-   example: `v0.13.0`). Make sure you follow the
-   [Semantic Versioning](https://semver.org) scheme.
-
-If you create the git tag via the command line, and push it (`git push --tags`), then the
-[release action](.github/workflows/release.yml) will be triggered. This in turn
-calls the [build-binaries action](.github/workflows/build-binaries.yml), creates
-a _draft_ release on GitHub and attaches the built binaries.
-
-Alternatively, you can manually create a release via the GitHub interface, also
-creating a release tag. Then you would run the
-[build-binaries action](.github/workflows/build-binaries.yml) manually, and
-again manually download and attach the binaries.
-
-In both cases the description of the release can be edited after the release is
-created (i.e, adding or editing the changelog).
-
 ## Documentation
 
 We're using [Sphinx](https://www.sphinx-doc.org/en/master/) as our documentation
@@ -144,10 +120,68 @@ reloading / live server style development.\
 Otherwise you can just manually rebuild with `make zkdocs` each time you want to
 preview your changes.
 
-## Deploying
+### Deploying
 
 Deployment to the world wide web happens via GitHub actions upon a PR to the
 main branch.
 
 So commit and push your changes to your own branch, and make a PR as usual.\
 Once merged to main, the site will be build and deployed.
+
+## Releasing a new version
+
+Once you're ready for a new relase, complete the following steps in order:
+
+1. Update your local `main` branch to the latest commit.
+2. Check that CHANGELOG.md shows the correct incoming version number and the
+   changelog itself is formatted / structured as the preceding entries are. You
+   can format with `npx prettier CHANGELOG.md --write`.
+3. Commit the changes with `git commit`. On the first line add
+   `Release v<version>`, leave a blank line underneath, and under that paste in
+   the changelog entries (removing the markdown heading symbols). See example
+   below.
+4. Tag this commit with `git tag -a v<version>` and format the message same as
+   the commit message.
+5. Push the commit and tag (`git push --all`). This will trigger the
+   [release action](.github/workflows/release.yml), which in turn calls the
+   [build-binaries action](.github/workflows/build-binaries.yml), creates a
+   _draft_ release on GitHub and attaches the built binaries.
+
+Alternatively, you can manually create a release via the GitHub interface, also
+creating a release tag. Then you would run the
+[build-binaries action](.github/workflows/build-binaries.yml) manually, and
+again manually download and attach the binaries.
+
+In both cases the description of the release can be edited after the release is
+created (i.e, adding or editing the changelog).
+
+### Example release commit/tag message:
+
+```
+Release v0.15.5
+
+Added:
+
+- List, edit and filter for broken links with `--broken-links` (by
+  @WhyNotHugo, 708)
+- Update strftime package, supporting `%g` and `%G` formats in the
+  `{{format-date}}` helper (by @tjex, 723)
+- Option to append links to selected text, instead of replacing (by @tjex, 724)
+
+Fixed:
+
+- Paths with `~` and env variables no longer error when passed to
+  `--notebook-dir` and `--working-dir` (by @tjex, 732)
+- Guard LSP against unnecessary erroring on missing textDocument/definition
+  capabilities (by @SAY-5, 718)
+```
+
+## Benchmarks
+
+Use `make testdata` to generate test notes in `testdata`, usable for reproducing
+test benchmarks on a notebook with 3k notes and ~15k links.
+
+When testing indexing or similar processes, be sure to test two approaches:
+
+- Indexing the entire database, by deleting `./testdata/.zk/notebook.db` first.
+- Indexing an incremental update, by `touch`ing a single note first.

@@ -7,10 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zk-org/zk/internal/util/errors"
+	"github.com/relvacode/iso8601"
 	"github.com/zk-org/zk/internal/util/opt"
 	strutil "github.com/zk-org/zk/internal/util/strings"
-	"github.com/relvacode/iso8601"
 	"gopkg.in/djherbis/times.v1"
 )
 
@@ -37,33 +36,29 @@ type NoteContent struct {
 	// Links is the list of outbound links found in the note.
 	Links []Link
 	// Additional metadata. For example, extracted from a YAML frontmatter.
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // ParseNoteAt implements NoteParser.
 func (n *Notebook) ParseNoteAt(absPath string) (*Note, error) {
-	wrap := errors.Wrapper(absPath)
-
 	content, err := n.fs.Read(absPath)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("parsing %s: %w", absPath, err)
 	}
 
 	return n.ParseNoteWithContent(absPath, content)
 }
 
 func (n *Notebook) ParseNoteWithContent(absPath string, content []byte) (*Note, error) {
-	wrap := errors.Wrapper(absPath)
-
 	relPath, err := n.RelPath(absPath)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("error calculating relative path %s: %w", absPath, err)
 	}
 
 	contentStr := string(content)
 	contentParts, err := n.Parser.ParseNoteContent(contentStr)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("error parsing note content %s: %w", absPath, err)
 	}
 
 	note := Note{
@@ -94,33 +89,45 @@ func (n *Notebook) ParseNoteWithContent(absPath string, content []byte) (*Note, 
 
 	times, err := times.Stat(absPath)
 	if err == nil {
-		note.Modified = times.ModTime().UTC()
-		note.Created = creationDateFrom(note.Metadata, times)
+		modifiedKey := n.Config.Format.Markdown.Frontmatter.ModificationDate
+		createdKey := n.Config.Format.Markdown.Frontmatter.CreationDate
+
+		if t, ok := dateFromFrontmatterKey(note.Metadata, modifiedKey); ok {
+			note.Modified = t
+		} else {
+			note.Modified = times.ModTime().UTC()
+		}
+
+		if t, ok := dateFromFrontmatterKey(note.Metadata, createdKey); ok {
+			note.Created = t
+		} else if times.HasBirthTime() {
+			note.Created = times.BirthTime()
+		} else {
+			note.Created = time.Now().UTC()
+		}
+
 	}
 
 	return &note, nil
 }
 
-func creationDateFrom(metadata map[string]interface{}, times times.Timespec) time.Time {
+// Parses dates from a frontmatter value. Falls back to returning the current
+// datetime along with false.
+func dateFromFrontmatterKey(metadata map[string]any, key string) (time.Time, bool) {
 	// Read the creation date from the YAML frontmatter `date` key.
-	if dateVal, ok := metadata["date"]; ok {
+	if dateVal, ok := metadata[key]; ok {
 		if dateStr, ok := dateVal.(string); ok {
 			if time, err := iso8601.ParseString(dateStr); err == nil {
-				return time
+				return time, true
 			}
 			// Omitting the `T` is common
 			if time, err := time.Parse("2006-01-02 15:04:05", dateStr); err == nil {
-				return time
+				return time, true
 			}
 			if time, err := time.Parse("2006-01-02 15:04", dateStr); err == nil {
-				return time
+				return time, true
 			}
 		}
 	}
-
-	if times.HasBirthTime() {
-		return times.BirthTime().UTC()
-	}
-
-	return time.Now().UTC()
+	return time.Now().UTC(), false
 }

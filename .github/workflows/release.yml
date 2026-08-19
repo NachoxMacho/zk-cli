@@ -5,26 +5,25 @@
 name: Release
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    tags: ['v*.*.*']
 
 jobs:
-  build-binaries:
-    uses: ./.github/workflows/build-binaries.yml
+  build:
+    uses: ./.github/workflows/build.yml
 
   create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write # required for release creation
-    needs: [build-binaries]
+    needs: [build]
     steps:
-      - name: Download artifacts from 'build binaries' workflow
-        uses: actions/download-artifact@v4
+      - name: Download artifacts from 'build' workflow
+        uses: actions/download-artifact@v8
         with:
           path: ~/downloaded
           merge-multiple: true
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: /home/runner/downloaded/*

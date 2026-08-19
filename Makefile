@@ -9,6 +9,7 @@ install:
 # Run unit tests.
 test:
 	$(call go,test,./...)
+	find . -name '*.go' | xargs gofmt -w
 
 # Run end-to-end tests.
 tesh: build
@@ -22,6 +23,12 @@ teshb: build
 tesh-update: build
 	PATH=".:$(shell pwd):$(PATH)" tesh -u tests tests/fixtures
 
+testdata:
+	$(call go,build,-o gentestdata ./cmd/gentestdata)
+	./gentestdata -output testdata -notes 3000
+	rm -f gentestdata
+	echo "Use with: zk testdata && ../zk…"
+
 alpine:
 	$(call alpine,build)
 
@@ -29,14 +36,22 @@ alpine:
 clean:
 	rm -rf zk*
 	rm -rf docs-build
+	rm -rf testdata
+
+VERSION ?= $(shell \
+	if grep -vq '^\$$Format' VERSION.txt 2>/dev/null; then \
+		cat VERSION.txt; \
+	else \
+		git describe --tags --always --dirty --match v[0-9]* 2>/dev/null; \
+	fi \
+)
+VERSION_DOCS := $(shell echo $(VERSION) | cut -c 2-)
 
 # Docs
 zkdocs:
 	mkdir -p docs-build
+	echo "$(VERSION_DOCS)" > docs/version.txt
 	sphinx-build -a docs docs-build 
-
-VERSION := `git describe --tags --match v[0-9]* 2> /dev/null`
-BUILD := `git rev-parse --short HEAD`
 
 ENV_PREFIX := CGO_ENABLED=1
 # Add necessary env variables for Apple Silicon.
@@ -46,11 +61,11 @@ endif
 
 # Wrapper around the go binary, to set all the default parameters.
 define go
-	$(ENV_PREFIX) go $(1) -tags "fts5" -ldflags "-X=main.Version=$(VERSION) -X=main.Build=$(BUILD)" $(2)
+	$(ENV_PREFIX) go $(1) -buildvcs=false -tags "fts5" -ldflags "-X=main.Version=$(VERSION)" $(2)
 endef
 
 # Alpine (musl) requires statically linked libs. This should be compatible for
 # Void linux and other musl based distros aswell.
 define alpine
-	$(ENV_PREFIX) go $(1) -tags "fts5" -ldflags "-extldflags=-static -X=main.Version=$(VERSION) -X=main.Build=$(BUILD)" $(2)
+	$(ENV_PREFIX) go $(1) -buildvcs=false -tags "fts5" -ldflags "-extldflags=-static -X=main.Version=$(VERSION)" $(2)
 endef

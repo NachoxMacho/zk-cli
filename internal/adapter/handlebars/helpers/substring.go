@@ -9,7 +9,6 @@ import (
 //
 // {{substring 'A full quote' 2 4}} -> "full"
 // {{substring 'A full quote' -5 5}} -> "quote"
-//
 func RegisterSubstring() {
 	raymond.RegisterHelper("substring", func(str string, index int, length int) string {
 		if index < 0 {
@@ -21,11 +20,4 @@ func RegisterSubstring() {
 		end := min(index+length, len(str))
 		return str[index:end]
 	})
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

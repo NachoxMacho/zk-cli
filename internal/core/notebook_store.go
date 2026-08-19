@@ -3,8 +3,6 @@ package core
 import (
 	"fmt"
 	"path/filepath"
-
-	"github.com/zk-org/zk/internal/util/errors"
 )
 
 // NotebookStore retrieves or creates new notebooks.
@@ -46,8 +44,6 @@ func (e ErrNotebookNotFound) Error() string {
 // Open returns a new Notebook instance for the notebook containing the
 // given file path.
 func (ns *NotebookStore) Open(path string) (*Notebook, error) {
-	wrap := errors.Wrapper("failed to open notebook")
-
 	path = ns.fs.Canonical(path)
 	nb := ns.cachedNotebookAt(path)
 	if nb != nil {
@@ -56,22 +52,22 @@ func (ns *NotebookStore) Open(path string) (*Notebook, error) {
 
 	path, err := ns.fs.Abs(path)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("failed to open notebook: %w", err)
 	}
 	path, err = ns.locateNotebook(path)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("failed to locate notebook: %w", err)
 	}
 
 	configPath := filepath.Join(path, ".zk/config.toml")
 	config, err := OpenConfig(configPath, ns.config, ns.fs, false)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("failed to open notebook config: %w", err)
 	}
 
 	nb, err = ns.notebookFactory(path, config)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("failed to open notebook: %w", err)
 	}
 	ns.notebooks[path] = nb
 
@@ -114,31 +110,29 @@ func NewDefaultInitOpts() InitOpts {
 
 // Init creates a new notebook at the given file path.
 func (ns *NotebookStore) Init(path string, options InitOpts) (*Notebook, error) {
-	wrap := errors.Wrapper("init")
-
 	path, err := ns.fs.Abs(path)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("init: %w", err)
 	}
 
 	if existingPath, err := ns.locateNotebook(path); err == nil {
-		return nil, wrap(fmt.Errorf("a notebook already exists in %v", existingPath))
+		return nil, fmt.Errorf("init: a notebook already exists in %v", existingPath)
 	}
 
 	// Create the default configuration file.
 	config, err := ns.generateConfig(options)
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("init: %w", err)
 	}
 	err = ns.fs.Write(filepath.Join(path, ".zk/config.toml"), []byte(config))
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("init: %w", err)
 	}
 
 	// Create the default template.
 	err = ns.fs.Write(filepath.Join(path, ".zk/templates/default.md"), []byte(defaultTemplate))
 	if err != nil {
-		return nil, wrap(err)
+		return nil, fmt.Errorf("init: %w", err)
 	}
 
 	return ns.Open(path)
@@ -293,6 +287,11 @@ multiword-tags = true
 multiword-tags = false
 {{/if}}
 
+#[format.markdown.frontmatter]
+
+# Define custom keys and properties of the frontmatter block
+#creation-date-key = "created" # default is "date"
+#modification-date-key = "changed" # default is "modified"
 
 # EXTERNAL TOOLS
 [tool]
@@ -316,7 +315,7 @@ multiword-tags = false
 # LSP
 #
 #   Configure basic editor integration for LSP-compatible editors.
-#   See https://github.com/zk-org/zk/blob/main/docs/editors-integration.md
+#   See https://zk-org.github.io/zk/tips/editors-integration.html
 #
 [lsp]
 
@@ -327,12 +326,19 @@ multiword-tags = false
 #wiki-title = "hint"
 # Warn for dead links between notes.
 dead-link = "error"
+# Warn when a note links to itself.
+#self-link = "warning"
+# Report missing backlinks
+#missing-backlink = { level = "hint", position = "bottom" }
+
 
 [lsp.completion]
 # Customize the completion pop-up of your LSP client.
 
 # Show the note title in the completion pop-up, or fallback on its path if empty.
 #note-label = "\{{title-or-path}}"
+# Filter the notes offered as completion items using CLI filtering options.
+#note-filter = "--tag project"
 # Filter out the completion pop-up using the note title or its path.
 #note-filter-text = "\{{title}} \{{path}}"
 # Show the note filename without extension as detail.

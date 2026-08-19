@@ -111,7 +111,7 @@ func TestNoteDAOAdd(t *testing.T) {
 			Body:       "Note body",
 			RawContent: "# Added note\nNote body",
 			WordCount:  2,
-			Metadata:   map[string]interface{}{"key": "value"},
+			Metadata:   map[string]any{"key": "value"},
 			Created:    time.Date(2019, 11, 20, 20, 32, 56, 0, time.UTC),
 			Modified:   time.Date(2020, 11, 22, 16, 49, 47, 0, time.UTC),
 			Checksum:   "check",
@@ -152,7 +152,7 @@ func TestNoteDAOUpdate(t *testing.T) {
 			Body:       "Updated body",
 			RawContent: "Updated raw content",
 			Checksum:   "updated checksum",
-			Metadata:   map[string]interface{}{"updated-key": "updated-value"},
+			Metadata:   map[string]any{"updated-key": "updated-value"},
 			WordCount:  42,
 			Created:    time.Date(2019, 11, 20, 20, 32, 56, 0, time.UTC),
 			Modified:   time.Date(2020, 11, 22, 16, 49, 47, 0, time.UTC),
@@ -213,7 +213,7 @@ func TestNoteDAORemoveCascadeLinks(t *testing.T) {
 		assert.Equal(t, len(links) > 0, true)
 
 		links = queryLinkRows(t, tx, `id = 4`)
-		assert.Equal(t, *links[0].TargetId, core.NoteID(1))
+		assert.Equal(t, *links[0].TargetID, core.NoteID(1))
 
 		err := dao.Remove("log/2021-01-03.md")
 		assert.Nil(t, err)
@@ -222,7 +222,7 @@ func TestNoteDAORemoveCascadeLinks(t *testing.T) {
 		assert.Equal(t, len(links), 0)
 
 		links = queryLinkRows(t, tx, `id = 4`)
-		assert.Nil(t, links[0].TargetId)
+		assert.Nil(t, links[0].TargetID)
 	})
 }
 
@@ -241,6 +241,57 @@ func TestNoteDAOFindIdsByHref(t *testing.T) {
 	// Filename takes precedence over the rest of the path.
 	// See https://github.com/zk-org/zk/issues/111
 	test("ref", true, []core.NoteID{8})
+
+}
+
+func TestNoteDAOFindIdsByHrefPrefixBug(t *testing.T) {
+	testNoteDAOWithFixtures(t, "", func(tx Transaction, dao *NoteDAO) {
+		shorterNote := core.Note{
+			Path:     "2024-08-27.md",
+			Title:    "Shorter note",
+			Body:     "This is the shorter note",
+			Modified: time.Date(2024, 8, 27, 10, 0, 0, 0, time.UTC),
+		}
+		longerNote := core.Note{
+			Path:     "2024-08-27_ajct.md",
+			Title:    "Longer note with suffix",
+			Body:     "This is the longer note with suffix",
+			Modified: time.Date(2024, 8, 27, 11, 0, 0, 0, time.UTC),
+		}
+
+		shorterID, err := dao.Add(shorterNote)
+		assert.Nil(t, err)
+		longerID, err := dao.Add(longerNote)
+		assert.Nil(t, err)
+
+		// Test partial matching like wiki links would use
+		ids, err := dao.FindIdsByHref("2024-08-27", true)
+		assert.Nil(t, err)
+		if len(ids) == 0 {
+			t.Fatal("Should find at least one match")
+		}
+
+		t.Logf("Partial: Found %d matches for '2024-08-27': %v", len(ids), ids)
+		t.Logf("Shorter note ID: %d, Longer note ID: %d", shorterID, longerID)
+		t.Logf("Expected first ID: %d (2024-08-27.md), Actual first ID: %d", shorterID, ids[0])
+
+		if ids[0] != shorterID {
+			t.Errorf("Expected exact match '2024-08-27.md' (ID %d) but got ID %d. This demonstrates the prefix matching bug.", shorterID, ids[0])
+		}
+
+		// Also test exact matching
+		exactIds, err := dao.FindIdsByHref("2024-08-27.md", false)
+		assert.Nil(t, err)
+		if len(exactIds) == 0 {
+			t.Fatal("Should find at least one exact match")
+		}
+
+		t.Logf("Exact: Found %d matches for '2024-08-27.md': %v", len(exactIds), exactIds)
+
+		if exactIds[0] != shorterID {
+			t.Errorf("Exact matching failed: Expected '2024-08-27.md' (ID %d) but got ID %d. This affects LSP markdown links.", shorterID, exactIds[0])
+		}
+	})
 }
 
 func TestNoteDAOFindIncludingHrefs(t *testing.T) {
@@ -291,20 +342,20 @@ func TestNoteDAOFindMinimalAll(t *testing.T) {
 		assert.Nil(t, err)
 
 		assert.Equal(t, notes, []core.MinimalNote{
-			{ID: 8, Path: "ref/test/ref.md", Title: "", Metadata: map[string]interface{}{}},
-			{ID: 5, Path: "ref/test/b.md", Title: "A nested note", Metadata: map[string]interface{}{}},
-			{ID: 4, Path: "f39c8.md", Title: "An interesting note", Metadata: map[string]interface{}{}},
-			{ID: 6, Path: "ref/test/a.md", Title: "Another nested note", Metadata: map[string]interface{}{
+			{ID: 8, Path: "ref/test/ref.md", Title: "", Metadata: map[string]any{}},
+			{ID: 5, Path: "ref/test/b.md", Title: "A nested note", Metadata: map[string]any{}},
+			{ID: 4, Path: "f39c8.md", Title: "An interesting note", Metadata: map[string]any{}},
+			{ID: 6, Path: "ref/test/a.md", Title: "Another nested note", Metadata: map[string]any{
 				"alias": "a.md",
 			}},
-			{ID: 1, Path: "log/2021-01-03.md", Title: "Daily note", Metadata: map[string]interface{}{
+			{ID: 1, Path: "log/2021-01-03.md", Title: "Daily note", Metadata: map[string]any{
 				"author": "Dom",
 			}},
-			{ID: 7, Path: "log/2021-02-04.md", Title: "February 4, 2021", Metadata: map[string]interface{}{}},
-			{ID: 3, Path: "index.md", Title: "Index", Metadata: map[string]interface{}{
-				"aliases": []interface{}{"First page"},
+			{ID: 7, Path: "log/2021-02-04.md", Title: "February 4, 2021", Metadata: map[string]any{}},
+			{ID: 3, Path: "index.md", Title: "Index", Metadata: map[string]any{
+				"aliases": []any{"First page"},
 			}},
-			{ID: 2, Path: "log/2021-01-04.md", Title: "January 4, 2021", Metadata: map[string]interface{}{}},
+			{ID: 2, Path: "log/2021-01-04.md", Title: "January 4, 2021", Metadata: map[string]any{}},
 		})
 	})
 }
@@ -320,13 +371,13 @@ func TestNoteDAOFindMinimalWithFilter(t *testing.T) {
 		assert.Nil(t, err)
 
 		assert.Equal(t, notes, []core.MinimalNote{
-			{ID: 1, Path: "log/2021-01-03.md", Title: "Daily note", Metadata: map[string]interface{}{
+			{ID: 1, Path: "log/2021-01-03.md", Title: "Daily note", Metadata: map[string]any{
 				"author": "Dom",
 			}},
-			{ID: 3, Path: "index.md", Title: "Index", Metadata: map[string]interface{}{
-				"aliases": []interface{}{"First page"},
+			{ID: 3, Path: "index.md", Title: "Index", Metadata: map[string]any{
+				"aliases": []any{"First page"},
 			}},
-			{ID: 7, Path: "log/2021-02-04.md", Title: "February 4, 2021", Metadata: map[string]interface{}{}},
+			{ID: 7, Path: "log/2021-02-04.md", Title: "February 4, 2021", Metadata: map[string]any{}},
 		})
 	})
 }
@@ -383,8 +434,8 @@ func TestNoteDAOFindMatch(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata: map[string]interface{}{
-						"aliases": []interface{}{"First page"},
+					Metadata: map[string]any{
+						"aliases": []any{"First page"},
 					},
 					Created:  time.Date(2019, 12, 4, 11, 59, 11, 0, time.UTC),
 					Modified: time.Date(2019, 12, 4, 12, 17, 21, 0, time.UTC),
@@ -403,7 +454,7 @@ func TestNoteDAOFindMatch(t *testing.T) {
 					WordCount:  3,
 					Links:      []core.Link{},
 					Tags:       []string{"fiction", "adventure"},
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"author": "Dom",
 					},
 					Created:  time.Date(2020, 11, 22, 16, 27, 45, 0, time.UTC),
@@ -423,7 +474,7 @@ func TestNoteDAOFindMatch(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata:   map[string]interface{}{},
+					Metadata:   map[string]any{},
 					Created:    time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Modified:   time.Date(2020, 11, 10, 8, 20, 18, 0, time.UTC),
 					Checksum:   "earkte",
@@ -441,7 +492,7 @@ func TestNoteDAOFindMatch(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata:   map[string]interface{}{},
+					Metadata:   map[string]any{},
 					Created:    time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Modified:   time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Checksum:   "arstde",
@@ -609,7 +660,7 @@ func TestNoteDAOFindMentions(t *testing.T) {
 					WordCount:  8,
 					Links:      []core.Link{},
 					Tags:       []string{"adventure", "history", "science"},
-					Metadata:   map[string]interface{}{},
+					Metadata:   map[string]any{},
 					Created:    time.Date(2019, 11, 20, 20, 32, 56, 0, time.UTC),
 					Modified:   time.Date(2019, 11, 20, 20, 34, 6, 0, time.UTC),
 					Checksum:   "yvwbae",
@@ -627,7 +678,7 @@ func TestNoteDAOFindMentions(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata:   map[string]interface{}{},
+					Metadata:   map[string]any{},
 					Created:    time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Modified:   time.Date(2020, 11, 10, 8, 20, 18, 0, time.UTC),
 					Checksum:   "earkte",
@@ -645,7 +696,7 @@ func TestNoteDAOFindMentions(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata:   map[string]interface{}{},
+					Metadata:   map[string]any{},
 					Created:    time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Modified:   time.Date(2020, 11, 29, 8, 20, 18, 0, time.UTC),
 					Checksum:   "arstde",
@@ -700,7 +751,7 @@ func TestNoteDAOFindMentionedBy(t *testing.T) {
 					WordCount:  3,
 					Links:      []core.Link{},
 					Tags:       []string{"fiction", "adventure"},
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"author": "Dom",
 					},
 					Created:  time.Date(2020, 11, 22, 16, 27, 45, 0, time.UTC),
@@ -720,8 +771,8 @@ func TestNoteDAOFindMentionedBy(t *testing.T) {
 					WordCount:  4,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata: map[string]interface{}{
-						"aliases": []interface{}{
+					Metadata: map[string]any{
+						"aliases": []any{
 							"First page",
 						},
 					},
@@ -818,7 +869,7 @@ func TestNoteDAOFindLinkedByWithSnippets(t *testing.T) {
 					WordCount:  5,
 					Links:      []core.Link{},
 					Tags:       []string{},
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"alias": "a.md",
 					},
 					Created:  time.Date(2019, 11, 20, 20, 32, 56, 0, time.UTC),
@@ -841,7 +892,7 @@ func TestNoteDAOFindLinkedByWithSnippets(t *testing.T) {
 					WordCount:  3,
 					Links:      []core.Link{},
 					Tags:       []string{"fiction", "adventure"},
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"author": "Dom",
 					},
 					Created:  time.Date(2020, 11, 22, 16, 27, 45, 0, time.UTC),
@@ -962,6 +1013,20 @@ func TestNoteDAOFindOrphan(t *testing.T) {
 	testNoteDAOFindPaths(t,
 		core.NoteFindOpts{Orphan: true},
 		[]string{"ref/test/ref.md", "ref/test/b.md", "log/2021-02-04.md"},
+	)
+}
+
+func TestNoteDAOFindMissingBacklink(t *testing.T) {
+	testNoteDAOFindPaths(t,
+		core.NoteFindOpts{MissingBacklink: true},
+		[]string{"f39c8.md", "ref/test/a.md", "log/2021-01-03.md", "index.md", "log/2021-01-04.md"},
+	)
+}
+
+func TestNoteDAOFindBrokenLinks(t *testing.T) {
+	testNoteDAOFindPaths(t,
+		core.NoteFindOpts{BrokenLinks: true},
+		[]string{"index.md"},
 	)
 }
 
@@ -1116,13 +1181,13 @@ func testNoteDAOFind(t *testing.T, opts core.NoteFindOpts, expected []core.Conte
 
 func testNoteDAO(t *testing.T, callback func(tx Transaction, dao *NoteDAO)) {
 	testTransaction(t, func(tx Transaction) {
-		callback(tx, NewNoteDAO(tx, &util.NullLogger))
+		callback(tx, NewNoteDAO(tx, &util.NullLogger, "md"))
 	})
 }
 
 func testNoteDAOWithFixtures(t *testing.T, fixtures string, callback func(tx Transaction, dao *NoteDAO)) {
 	testTransactionWithFixtures(t, opt.NewNotEmptyString(fixtures), func(tx Transaction) {
-		callback(tx, NewNoteDAO(tx, &util.NullLogger))
+		callback(tx, NewNoteDAO(tx, &util.NullLogger, "md"))
 	})
 }
 

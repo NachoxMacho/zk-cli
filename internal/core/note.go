@@ -24,7 +24,7 @@ type MinimalNote struct {
 	// Title of the note.
 	Title string
 	// JSON dictionary of raw metadata extracted from the frontmatter.
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // Note holds the metadata and content of a single note.
@@ -48,7 +48,7 @@ type Note struct {
 	// List of tags found in the content.
 	Tags []string
 	// JSON dictionary of raw metadata extracted from the frontmatter.
-	Metadata map[string]interface{}
+	Metadata map[string]any
 	// Date of creation.
 	Created time.Time
 	// Date of last modification.
@@ -80,8 +80,8 @@ func (n Note) FilenameStem() string {
 // ContextualNote holds a Note and context-sensitive content snippets.
 //
 // This is used for example:
-//   * to show an excerpt with highlighted search terms
-//   * when following links, to print the source paragraph
+//   - to show an excerpt with highlighted search terms
+//   - when following links, to print the source paragraph
 type ContextualNote struct {
 	Note
 	// List of context-sensitive excerpts from the note.

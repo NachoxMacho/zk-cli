@@ -99,8 +99,8 @@ conf = '$EDITOR "$ZK_NOTEBOOK_DIR/.zk/config.toml"'
 
 Use this alias to send a list of space-separated file paths matching the given
 [filtering criteria](../notes/note-filtering.md) to another program. See
-[send notes for processing by other programs](../tips/external-processing.md) for more
-details.
+[send notes for processing by other programs](../tips/external-processing.md)
+for more details.
 
 ```toml
 paths = "zk list --quiet --format \"'{{path}}'\" --delimiter ' ' $@"
@@ -185,6 +185,14 @@ This is such a useful command, that an alias might be helpful.
 bl = "zk list --link-to $@"
 ```
 
+### Fix missing backlinks interactively
+
+Edit notes that have incoming links but don't link back to them.
+
+```toml
+fix-backlinks = "zk edit --interactive --missing-backlink"
+```
+
 ### Locate unlinked mentions in a note
 
 This alias can help you look for potential new links to establish, by listing
@@ -235,3 +243,8 @@ cp = 'mkdir -p "$1" && zk list --quiet --format path --delimiter0 ${@:2} | xargs
 ```
 
 Usage: `zk cp output/ --created-after 'last two weeks'`
+
+## Listing aliases
+
+You can list all the aliases found in your configuration file using
+`zk config --list aliases`.

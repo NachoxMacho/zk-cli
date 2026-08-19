@@ -7,10 +7,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/zk-org/zk/internal/core"
-	"github.com/zk-org/zk/internal/util/errors"
+	"errors"
+
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+	"github.com/zk-org/zk/internal/core"
 )
 
 func pathToURI(path string) string {
@@ -51,20 +52,22 @@ type jsonBoolean bool
 
 func (b *jsonBoolean) UnmarshalJSON(data []byte) error {
 	s := string(data)
-	if s == "1" || s == "true" {
+	switch s {
+	case "1", "true":
 		*b = true
-	} else if s == "0" || s == "false" {
+	case "0", "false":
 		*b = false
-	} else {
+	default:
 		return fmt.Errorf("%s: failed to unmarshal as boolean", s)
 	}
 	return nil
 }
 
 type linkInfo struct {
-    note *core.MinimalNote
+	note     *core.MinimalNote
 	location *protocol.Location
 	title    *string
+	prefix   string
 }
 
 func linkNote(notebook *core.Notebook, documents *documentStore, context *glsp.Context, info *linkInfo) error {
@@ -75,7 +78,7 @@ func linkNote(notebook *core.Notebook, documents *documentStore, context *glsp.C
 	// Get current document to edit
 	doc, ok := documents.Get(info.location.URI)
 	if !ok {
-		return fmt.Errorf("Cannot insert link in '%s'", info.location.URI)
+		return fmt.Errorf("cannot insert link in '%s'", info.location.URI)
 	}
 
 	formatter, err := notebook.NewLinkFormatter()
@@ -105,6 +108,8 @@ func linkNote(notebook *core.Notebook, documents *documentStore, context *glsp.C
 	if err != nil {
 		return err
 	}
+
+	link = info.prefix + link
 
 	go context.Call(protocol.ServerWorkspaceApplyEdit, protocol.ApplyWorkspaceEditParams{
 		Edit: protocol.WorkspaceEdit{

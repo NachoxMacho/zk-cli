@@ -39,6 +39,10 @@ func TestParseDefaultConfig(t *testing.T) {
 				LinkFormat:        "markdown",
 				LinkEncodePath:    true,
 				LinkDropExtension: true,
+				Frontmatter: YamlFrontmatterConfig{
+					CreationDate:     "date",
+					ModificationDate: "modified",
+				},
 			},
 		},
 		Tool: ToolConfig{
@@ -50,8 +54,9 @@ func TestParseDefaultConfig(t *testing.T) {
 		},
 		LSP: LSPConfig{
 			Diagnostics: LSPDiagnosticConfig{
-				WikiTitle: LSPDiagnosticNone,
-				DeadLink:  LSPDiagnosticError,
+				WikiTitle:       LSPDiagnosticNone,
+				DeadLink:        LSPDiagnosticError,
+				MissingBacklink: MissingBacklinkConfig{},
 			},
 		},
 		Filters: make(map[string]string),
@@ -90,6 +95,10 @@ func TestParseComplete(t *testing.T) {
 		link-format = "custom"
 		link-encode-path = true
 		link-drop-extension = false
+
+		[format.markdown.frontmatter]
+		creation-date-key = "created"
+		modification-date-key = "changed"
 
 		[tool]
 		editor = "vim"
@@ -139,6 +148,7 @@ func TestParseComplete(t *testing.T) {
 		use-additional-text-edits = true
 		note-label = "notelabel"
 		note-filter-text = "notefiltertext"
+		note-filter = "--tag project"
 		note-detail = "notedetail"
 		
 		[lsp.diagnostics]
@@ -235,6 +245,10 @@ func TestParseComplete(t *testing.T) {
 				LinkFormat:        "custom",
 				LinkEncodePath:    true,
 				LinkDropExtension: false,
+				Frontmatter: YamlFrontmatterConfig{
+					CreationDate:     "created",
+					ModificationDate: "changed",
+				},
 			},
 		},
 		Tool: ToolConfig{
@@ -253,11 +267,13 @@ func TestParseComplete(t *testing.T) {
 					FilterText: opt.NewString("notefiltertext"),
 					Detail:     opt.NewString("notedetail"),
 				},
+				NoteFilter:             opt.NewString("--tag project"),
 				UseAdditionalTextEdits: opt.True,
 			},
 			Diagnostics: LSPDiagnosticConfig{
-				WikiTitle: LSPDiagnosticHint,
-				DeadLink:  LSPDiagnosticNone,
+				WikiTitle:       LSPDiagnosticHint,
+				DeadLink:        LSPDiagnosticNone,
+				MissingBacklink: MissingBacklinkConfig{},
 			},
 		},
 		Filters: map[string]string{
@@ -421,6 +437,10 @@ func TestParseMergesGroupConfig(t *testing.T) {
 				LinkFormat:        "markdown",
 				LinkEncodePath:    true,
 				LinkDropExtension: true,
+				Frontmatter: YamlFrontmatterConfig{
+					CreationDate:     "date",
+					ModificationDate: "modified",
+				},
 			},
 		},
 		LSP: LSPConfig{
@@ -432,8 +452,9 @@ func TestParseMergesGroupConfig(t *testing.T) {
 				},
 			},
 			Diagnostics: LSPDiagnosticConfig{
-				WikiTitle: LSPDiagnosticNone,
-				DeadLink:  LSPDiagnosticError,
+				WikiTitle:       LSPDiagnosticNone,
+				DeadLink:        LSPDiagnosticError,
+				MissingBacklink: MissingBacklinkConfig{},
 			},
 		},
 		Filters: make(map[string]string),
@@ -542,11 +563,13 @@ func TestParseLSPDiagnosticsSeverity(t *testing.T) {
 			[lsp.diagnostics]
 			wiki-title = "%s"
 			dead-link = "%s"
-		`, value, value)
+			self-link = "%s"
+		`, value, value, value)
 		conf, err := ParseConfig([]byte(toml), ".zk/config.toml", NewDefaultConfig(), false)
 		assert.Nil(t, err)
 		assert.Equal(t, conf.LSP.Diagnostics.WikiTitle, expected)
 		assert.Equal(t, conf.LSP.Diagnostics.DeadLink, expected)
+		assert.Equal(t, conf.LSP.Diagnostics.SelfLink, expected)
 	}
 
 	test("", LSPDiagnosticNone)
@@ -562,6 +585,40 @@ func TestParseLSPDiagnosticsSeverity(t *testing.T) {
 	`
 	_, err := ParseConfig([]byte(toml), ".zk/config.toml", NewDefaultConfig(), false)
 	assert.Err(t, err, "foobar: unknown LSP diagnostic severity - may be none, hint, info, warning or error")
+}
+
+func TestParseMissingBacklinkConfig(t *testing.T) {
+	test := func(level string, position string, expectedLevel LSPDiagnosticSeverity, expectedPosition LSPDiagnosticPosition) {
+		toml := fmt.Sprintf(`
+			[lsp.diagnostics]
+			missing-backlink = { level = "%s", position = "%s" }
+		`, level, position)
+		conf, err := ParseConfig([]byte(toml), ".zk/config.toml", NewDefaultConfig(), false)
+		assert.Nil(t, err)
+		assert.Equal(t, conf.LSP.Diagnostics.MissingBacklink.Level, expectedLevel)
+		assert.Equal(t, conf.LSP.Diagnostics.MissingBacklink.Position, expectedPosition)
+	}
+
+	test("warning", "top", LSPDiagnosticWarning, LSPDiagnosticPositionTop)
+	test("error", "bottom", LSPDiagnosticError, LSPDiagnosticPositionBottom)
+	test("hint", "last-section", LSPDiagnosticHint, LSPDiagnosticPositionLastSection)
+	test("info", "top", LSPDiagnosticInfo, LSPDiagnosticPositionTop)
+
+	// Test invalid level.
+	toml := `
+		[lsp.diagnostics]
+		missing-backlink = { level = "invalid", position = "top" }
+	`
+	_, err := ParseConfig([]byte(toml), ".zk/config.toml", NewDefaultConfig(), false)
+	assert.Err(t, err, "invalid: unknown LSP diagnostic severity - may be none, hint, info, warning or error")
+
+	// Test invalid position.
+	toml = `
+		[lsp.diagnostics]
+		missing-backlink = { level = "warning", position = "invalid" }
+	`
+	_, err = ParseConfig([]byte(toml), ".zk/config.toml", NewDefaultConfig(), false)
+	assert.Err(t, err, "invalid: unknown LSP diagnostic position - may be top, bottom, or last-section")
 }
 
 func TestGroupConfigExcludeGlobs(t *testing.T) {

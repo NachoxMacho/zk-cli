@@ -17,6 +17,7 @@ import (
 	"github.com/zk-org/zk/internal/core"
 	"github.com/zk-org/zk/internal/util"
 	"github.com/zk-org/zk/internal/util/errors"
+	"github.com/zk-org/zk/internal/cli"
 	"github.com/zk-org/zk/internal/util/opt"
 	strutil "github.com/zk-org/zk/internal/util/strings"
 )
@@ -73,7 +74,7 @@ func NewServer(opts ServerOpts) *Server {
 
 	var clientCapabilities protocol.ClientCapabilities
 
-	handler.Initialize = func(context *glsp.Context, params *protocol.InitializeParams) (interface{}, error) {
+	handler.Initialize = func(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
 		clientCapabilities = params.Capabilities
 
 		// To see the logs with coc.nvim, run :CocCommand workspace.showOutput
@@ -191,7 +192,7 @@ func NewServer(opts ServerOpts) *Server {
 		return nil
 	}
 
-	handler.TextDocumentCompletion = func(context *glsp.Context, params *protocol.CompletionParams) (interface{}, error) {
+	handler.TextDocumentCompletion = func(context *glsp.Context, params *protocol.CompletionParams) (any, error) {
 		doc, ok := server.documents.Get(params.TextDocument.URI)
 		if !ok {
 			return nil, nil
@@ -306,7 +307,7 @@ func NewServer(opts ServerOpts) *Server {
 		return documentLinks, err
 	}
 
-	handler.TextDocumentDefinition = func(context *glsp.Context, params *protocol.DefinitionParams) (interface{}, error) {
+	handler.TextDocumentDefinition = func(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
 		doc, ok := server.documents.Get(params.TextDocument.URI)
 		if !ok {
 			return nil, nil
@@ -323,17 +324,15 @@ func NewServer(opts ServerOpts) *Server {
 		}
 
 		target, err := server.noteForLink(*link, notebook)
-		if link == nil || target == nil || err != nil {
+		if target == nil || err != nil {
 			return nil, err
 		}
 
-		// FIXME: Waiting for https://github.com/tliron/glsp/pull/3 to be
-		// merged before using LocationLink.
-		if false && isTrue(clientCapabilities.TextDocument.Definition.LinkSupport) {
-			return protocol.LocationLink{
+		if definitionLinkSupport(clientCapabilities) {
+			return []protocol.LocationLink{{
 				OriginSelectionRange: &link.Range,
 				TargetURI:            target.URI,
-			}, nil
+			}}, nil
 		} else {
 			return protocol.Location{
 				URI: target.URI,
@@ -341,8 +340,7 @@ func NewServer(opts ServerOpts) *Server {
 		}
 	}
 
-	handler.WorkspaceExecuteCommand = func(context *glsp.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
-
+	handler.WorkspaceExecuteCommand = func(context *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
 		openNotebook := func() (*core.Notebook, error) {
 			args := params.Arguments
 			if len(args) == 0 {
@@ -397,11 +395,7 @@ func NewServer(opts ServerOpts) *Server {
 		}
 	}
 
-	handler.TextDocumentCodeAction = func(context *glsp.Context, params *protocol.CodeActionParams) (interface{}, error) {
-		if isRangeEmpty(params.Range) {
-			return nil, nil
-		}
-
+	handler.TextDocumentCodeAction = func(context *glsp.Context, params *protocol.CodeActionParams) (any, error) {
 		doc, ok := server.documents.Get(params.TextDocument.URI)
 		if !ok {
 			return nil, nil
@@ -410,37 +404,43 @@ func NewServer(opts ServerOpts) *Server {
 
 		actions := []protocol.CodeAction{}
 
-		addAction := func(dir string, actionTitle string) error {
-			opts := cmdNewOpts{
-				Title: doc.ContentAtRange(params.Range),
-				Dir:   dir,
-				InsertLinkAtLocation: &protocol.Location{
-					URI:   params.TextDocument.URI,
-					Range: params.Range,
-				},
+		missingBacklinkActions := server.getMissingBacklinkCodeActions(doc, params.TextDocument.URI, params.Range)
+		actions = append(actions, missingBacklinkActions...)
+
+		// Only add "New note" actions if range is not empty.
+		if !isRangeEmpty(params.Range) {
+			addAction := func(dir string, actionTitle string) error {
+				opts := cmdNewOpts{
+					Title: doc.ContentAtRange(params.Range),
+					Dir:   dir,
+					InsertLinkAtLocation: &protocol.Location{
+						URI:   params.TextDocument.URI,
+						Range: params.Range,
+					},
+				}
+
+				var jsonOpts map[string]any
+				err := unmarshalJSON(opts, &jsonOpts)
+				if err != nil {
+					return err
+				}
+
+				actions = append(actions, protocol.CodeAction{
+					Title: actionTitle,
+					Kind:  stringPtr(protocol.CodeActionKindRefactor),
+					Command: &protocol.Command{
+						Title:     actionTitle,
+						Command:   cmdNew,
+						Arguments: []any{wd, jsonOpts},
+					},
+				})
+
+				return nil
 			}
 
-			var jsonOpts map[string]interface{}
-			err := unmarshalJSON(opts, &jsonOpts)
-			if err != nil {
-				return err
-			}
-
-			actions = append(actions, protocol.CodeAction{
-				Title: actionTitle,
-				Kind:  stringPtr(protocol.CodeActionKindRefactor),
-				Command: &protocol.Command{
-					Title:     actionTitle,
-					Command:   cmdNew,
-					Arguments: []interface{}{wd, jsonOpts},
-				},
-			})
-
-			return nil
+			addAction(wd, "New note in current directory")
+			addAction("", "New note in top directory")
 		}
-
-		addAction(wd, "New note in current directory")
-		addAction("", "New note in top directory")
 
 		return actions, nil
 	}
@@ -467,6 +467,7 @@ func NewServer(opts ServerOpts) *Server {
 			}
 		}
 
+		// TODO: possible nil
 		target, err := server.noteForLink(*link, notebook)
 		if link == nil || target == nil || err != nil {
 			return nil, err
@@ -516,7 +517,10 @@ func NewServer(opts ServerOpts) *Server {
 
 // Run starts the Language Server in stdio mode.
 func (s *Server) Run() error {
-	return errors.Wrap(s.server.RunStdio(), "lsp")
+	if err := s.server.RunStdio(); err != nil {
+		return fmt.Errorf("lsp: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) notebookOf(doc *document) (*core.Notebook, error) {
@@ -539,8 +543,8 @@ func (s *Server) noteForLink(link documentLink, notebook *core.Notebook) (*Note,
 		return nil, err
 	}
 
-	joined_path := filepath.Join(notebook.Path, note.Path)
-	return &Note{*note, pathToURI(joined_path)}, nil
+	joinedPath := filepath.Join(notebook.Path, note.Path)
+	return &Note{*note, pathToURI(joinedPath)}, nil
 }
 
 // noteForHref returns the Note object for the note targeted by the given HREF
@@ -556,7 +560,7 @@ func (s *Server) noteForHref(href string, relativeToDir string, notebook *core.N
 	}
 	path, err := filepath.Rel(notebook.Path, path)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to resolve href: %s", href)
+		return nil, fmt.Errorf("failed to resolve href: %s: %w", href, err)
 	}
 	note, err := notebook.FindByHref(path, false)
 	if err != nil {
@@ -611,11 +615,7 @@ func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyF
 	}
 
 	diagConfig := notebook.Config.LSP.Diagnostics
-	if diagConfig.WikiTitle == core.LSPDiagnosticNone &&
-		diagConfig.DeadLink == core.LSPDiagnosticNone &&
-		diagConfig.MissingLink == core.LSPDiagnosticNone &&
-		diagConfig.OrphanNote == core.LSPDiagnosticNone {
-		// No diagnostic enabled.
+	if !diagConfig.IsEnabled() {
 		return
 	}
 
@@ -651,6 +651,12 @@ func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyF
 				}
 				severity = protocol.DiagnosticSeverity(diagConfig.DeadLink)
 				message = "not found"
+			} else if target.URI == doc.URI {
+				if diagConfig.SelfLink == core.LSPDiagnosticNone {
+					continue
+				}
+				severity = protocol.DiagnosticSeverity(diagConfig.SelfLink)
+				message = "self-referential link"
 			} else {
 				if diagConfig.WikiTitle == core.LSPDiagnosticNone {
 					continue
@@ -740,6 +746,10 @@ func (s *Server) refreshDiagnosticsOfDocument(doc *document, notify glsp.NotifyF
 					})
 				}
 			}
+		}
+		if diagConfig.MissingBacklink.Level != core.LSPDiagnosticNone {
+			backlinks := s.getMissingBacklinkDiagnostics(doc, notebook, diagConfig.MissingBacklink)
+			diagnostics = append(diagnostics, backlinks...)
 		}
 
 		go notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
@@ -844,13 +854,24 @@ func (s *Server) buildLinkCompletionList(notebook *core.Notebook, doc *document,
 		return nil, err
 	}
 
-	notes, err := notebook.FindMinimalNotes(core.NoteFindOpts{})
+	findOpts, err := noteCompletionFindOpts(notebook)
+	if err != nil {
+		return nil, err
+	}
+
+	notes, err := notebook.FindMinimalNotes(findOpts)
 	if err != nil {
 		return nil, err
 	}
 
 	var items []protocol.CompletionItem
 	for _, note := range notes {
+		// Exclude current note from completion results.
+		notePath := filepath.Join(notebook.Path, note.Path)
+		if notePath == doc.Path {
+			continue
+		}
+
 		item, err := s.newCompletionItem(notebook, note, doc, position, linkFormatter, templates)
 		if err != nil {
 			s.logger.Err(err)
@@ -899,6 +920,25 @@ func (s *Server) buildLinkCompletionList(notebook *core.Notebook, doc *document,
 	}
 
 	return items, nil
+}
+
+func noteCompletionFindOpts(notebook *core.Notebook) (core.NoteFindOpts, error) {
+	filter := notebook.Config.LSP.Completion.NoteFilter
+	if filter.IsNull() {
+		return core.NoteFindOpts{}, nil
+	}
+
+	filtering, err := cli.ParseFilter(*filter.Value)
+	if err != nil {
+		return core.NoteFindOpts{}, fmt.Errorf("failed to parse lsp.completion.note-filter: %w", err)
+	}
+
+	opts, err := filtering.NewNoteFindOpts(notebook)
+	if err != nil {
+		return core.NoteFindOpts{}, fmt.Errorf("failed to apply lsp.completion.note-filter: %w", err)
+	}
+
+	return opts, nil
 }
 
 func newLinkFormatter(notebook *core.Notebook, doc *document, position protocol.Position) (core.LinkFormatter, error) {
@@ -956,7 +996,7 @@ func (s *Server) newCompletionItem(notebook *core.Notebook, note core.MinimalNot
 
 	item.TextEdit, err = s.newTextEditForLink(notebook, note, doc, pos, linkFormatter)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to build TextEdit for note at %s", note.Path)
+		err = fmt.Errorf("failed to build TextEdit for note at %s: %w", note.Path, err)
 		return item, err
 	}
 
@@ -983,7 +1023,7 @@ func (s *Server) newCompletionItem(notebook *core.Notebook, note core.MinimalNot
 	return item, nil
 }
 
-func (s *Server) newTextEditForLink(notebook *core.Notebook, note core.MinimalNote, doc *document, pos protocol.Position, linkFormatter core.LinkFormatter) (interface{}, error) {
+func (s *Server) newTextEditForLink(notebook *core.Notebook, note core.MinimalNote, doc *document, pos protocol.Position, linkFormatter core.LinkFormatter) (any, error) {
 	path := core.NotebookPath{
 		Path:       note.Path,
 		BasePath:   notebook.Path,
@@ -1063,11 +1103,12 @@ func boolPtr(v bool) *bool {
 }
 
 func isTrue(v *bool) bool {
-	return v != nil && *v == true
+	return v != nil && *v
 }
 
-func isFalse(v *bool) bool {
-	return v == nil || *v == false
+// definitionLinkSupport reports whether the client advertised textDocument.definition.linkSupport=true.
+func definitionLinkSupport(caps protocol.ClientCapabilities) bool {
+	return caps.TextDocument != nil && caps.TextDocument.Definition != nil && isTrue(caps.TextDocument.Definition.LinkSupport)
 }
 
 func stringPtr(v string) *string {
@@ -1075,7 +1116,7 @@ func stringPtr(v string) *string {
 	return &s
 }
 
-func unmarshalJSON(obj interface{}, v interface{}) error {
+func unmarshalJSON(obj any, v any) error {
 	js, err := json.Marshal(obj)
 	if err != nil {
 		return err
@@ -1083,7 +1124,283 @@ func unmarshalJSON(obj interface{}, v interface{}) error {
 	return json.Unmarshal(js, v)
 }
 
-func toBool(obj interface{}) bool {
+func toBool(obj any) bool {
 	s := strings.ToLower(fmt.Sprint(obj))
 	return s == "true" || s == "1"
+}
+
+// MissingBacklink contains information of a note that links to the current note.
+type MissingBacklink struct {
+	SourcePath  string
+	SourceTitle string
+}
+
+// findMissingBacklinks finds notes that link to the current note but are not linked back.
+func (s *Server) findMissingBacklinks(currentNoteID core.NoteID, notebook *core.Notebook, doc *document) ([]MissingBacklink, error) {
+	currentNote, err := notebook.FindMinimalNotes(core.NoteFindOpts{
+		IncludeIDs: []core.NoteID{currentNoteID},
+	})
+	if err != nil || len(currentNote) == 0 {
+		return nil, err
+	}
+	currentNotePath := currentNote[0].Path
+
+	notesThatLinkToUs, err := notebook.FindMinimalNotes(core.NoteFindOpts{
+		LinkTo: &core.LinkFilter{
+			Hrefs: []string{currentNotePath},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(notesThatLinkToUs) == 0 {
+		return nil, nil
+	}
+
+	currentDocLinks, err := doc.DocumentLinks()
+	if err != nil {
+		return nil, err
+	}
+
+	backlinkedNoteIDs := make(map[core.NoteID]bool)
+	for _, link := range currentDocLinks {
+		if strutil.IsURL(link.Href) {
+			continue
+		}
+		// Resolve the link to find the target note
+		target, err := s.noteForLink(link, notebook)
+		if err != nil || target == nil {
+			continue
+		}
+		// Extract note ID from the URI - we need to find the note by path
+		targetPath, err := uriToPath(target.URI)
+		if err != nil {
+			continue
+		}
+		targetRelPath, err := notebook.RelPath(targetPath)
+		if err != nil {
+			continue
+		}
+		targetNote, err := notebook.FindByHref(targetRelPath, false)
+		if err != nil || targetNote == nil {
+			continue
+		}
+		backlinkedNoteIDs[targetNote.ID] = true
+	}
+
+	var missingBacklinks []MissingBacklink
+	for _, linkingNote := range notesThatLinkToUs {
+		if !backlinkedNoteIDs[linkingNote.ID] {
+			missingBacklinks = append(missingBacklinks, MissingBacklink{
+				SourcePath:  linkingNote.Path,
+				SourceTitle: linkingNote.Title,
+			})
+		}
+	}
+
+	return missingBacklinks, nil
+}
+
+// getMissingBacklinkDiagnostics returns diagnostics for missing backlinks in the current document.
+func (s *Server) getMissingBacklinkDiagnostics(doc *document, notebook *core.Notebook, config core.MissingBacklinkConfig) []protocol.Diagnostic {
+	relPath, err := notebook.RelPath(doc.Path)
+	if err != nil {
+		s.logger.Err(err)
+		return nil
+	}
+
+	currentNote, err := notebook.FindByHref(relPath, false)
+	if err != nil {
+		s.logger.Err(err)
+		return nil
+	}
+
+	if currentNote == nil {
+		return nil
+	}
+
+	missingBacklinks, err := s.findMissingBacklinks(currentNote.ID, notebook, doc)
+	if err != nil {
+		s.logger.Err(err)
+		return nil
+	}
+
+	lines := strings.Split(doc.Content, "\n")
+
+	var targetLine uint32
+	switch config.Position {
+	case core.LSPDiagnosticPositionTop:
+		targetLine = 0
+	case core.LSPDiagnosticPositionBottom:
+		targetLine = uint32(len(lines) - 1)
+	case core.LSPDiagnosticPositionLastSection:
+		targetLine = findLastSectionLine(lines)
+	default:
+		targetLine = uint32(len(lines) - 1) // Fallback to bottom
+	}
+
+	var diagnostics []protocol.Diagnostic
+	for _, backlink := range missingBacklinks {
+		diagSeverity := protocol.DiagnosticSeverity(config.Level)
+
+		noteTitle := backlink.SourceTitle
+		if noteTitle == "" {
+			noteTitle = backlink.SourcePath
+		}
+
+		// Convert path to be relative to current note's directory
+		currentNoteDir := filepath.Dir(doc.Path)
+		sourceNotePath := filepath.Join(notebook.Path, backlink.SourcePath)
+		relativePath, err := filepath.Rel(currentNoteDir, sourceNotePath)
+		if err != nil {
+			// Fallback to original path if relative path calculation fails
+			relativePath = backlink.SourcePath
+		}
+
+		message := fmt.Sprintf("Missing backlink to [%s](%s)", noteTitle, relativePath)
+
+		diagnostics = append(diagnostics, protocol.Diagnostic{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: targetLine, Character: 0},
+				End:   protocol.Position{Line: targetLine, Character: 0},
+			},
+			Severity: &diagSeverity,
+			Source:   stringPtr("zk"),
+			Message:  message,
+		})
+	}
+
+	return diagnostics
+}
+
+// findLastSectionLine finds the line number of the last heading in the document.
+// Falls back to line 0 (top) if no headings are found.
+func findLastSectionLine(lines []string) uint32 {
+	headingRegex := regexp.MustCompile(`^#{1,6}\s+`)
+	var lastHeadingLine uint32 = 0 // Fallback to top
+	for i, line := range lines {
+		if headingRegex.MatchString(line) {
+			lastHeadingLine = uint32(i)
+		}
+	}
+	return lastHeadingLine
+}
+
+// getMissingBacklinkCodeActions returns code actions for adding missing backlinks.
+func (s *Server) getMissingBacklinkCodeActions(doc *document, docURI protocol.DocumentUri, requestRange protocol.Range) []protocol.CodeAction {
+	notebook, err := s.notebookOf(doc)
+	if err != nil {
+		return nil
+	}
+
+	diagConfig := notebook.Config.LSP.Diagnostics
+	if diagConfig.MissingBacklink.Level == core.LSPDiagnosticNone {
+		return nil
+	}
+
+	relPath, err := notebook.RelPath(doc.Path)
+	if err != nil {
+		return nil
+	}
+
+	currentNote, err := notebook.FindByHref(relPath, false)
+	if err != nil || currentNote == nil {
+		return nil
+	}
+
+	missingBacklinks, err := s.findMissingBacklinks(currentNote.ID, notebook, doc)
+	if err != nil || len(missingBacklinks) == 0 {
+		return nil
+	}
+
+	var actions []protocol.CodeAction
+	var formattedLinks []string
+
+	lines := strings.Split(doc.Content, "\n")
+	currentLine := min(requestRange.End.Line, uint32(len(lines)-1))
+
+	insertPosition := protocol.Position{
+		Line:      currentLine,
+		Character: uint32(len(lines[currentLine])),
+	}
+
+	// Format all links once and generate individual actions
+	for _, backlink := range missingBacklinks {
+		// Full note metadata is required for NewLinkFormatterContext
+		sourceNote, err := notebook.FindByHref(backlink.SourcePath, false)
+		if err != nil || sourceNote == nil {
+			continue
+		}
+
+		linkFormatter, err := notebook.NewLinkFormatter()
+		if err != nil {
+			continue
+		}
+
+		noteDir := filepath.Dir(doc.Path)
+		linkPath := core.NotebookPath{
+			Path:       backlink.SourcePath,
+			BasePath:   notebook.Path,
+			WorkingDir: noteDir,
+		}
+		linkContext, err := core.NewLinkFormatterContext(linkPath, backlink.SourceTitle, sourceNote.Metadata)
+		if err != nil {
+			continue
+		}
+
+		link, err := linkFormatter(linkContext)
+		if err != nil {
+			continue
+		}
+
+		// Store formatted link for reuse
+		formattedLinks = append(formattedLinks, link)
+
+		title := backlink.SourceTitle
+		if title == "" {
+			title = filepath.Base(backlink.SourcePath)
+		}
+
+		// Create individual action
+		actions = append(actions, protocol.CodeAction{
+			Title: fmt.Sprintf("Add backlink to %s", title),
+			Kind:  stringPtr(protocol.CodeActionKindQuickFix),
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+					docURI: {{
+						Range: protocol.Range{
+							Start: insertPosition,
+							End:   insertPosition,
+						},
+						NewText: "\n" + link,
+					}},
+				},
+			},
+		})
+	}
+
+	// Add "add all missing backlinks" action if there are multiple backlinks
+	if len(formattedLinks) > 1 {
+		// Join all formatted links with newlines
+		allLinksText := "\n" + strings.Join(formattedLinks, "\n")
+
+		actions = append(actions, protocol.CodeAction{
+			Title: fmt.Sprintf("Add all %d missing backlinks", len(formattedLinks)),
+			Kind:  stringPtr(protocol.CodeActionKindQuickFix),
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentUri][]protocol.TextEdit{
+					docURI: {{
+						Range: protocol.Range{
+							Start: insertPosition,
+							End:   insertPosition,
+						},
+						NewText: allLinksText,
+					}},
+				},
+			},
+		})
+	}
+
+	return actions
 }

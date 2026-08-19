@@ -597,16 +597,92 @@ A link can have [one relation](one "rel-1") or [several relations](several "rel-
 	})
 }
 
-func TestParseMetadataFromFrontmatter(t *testing.T) {
-	test := func(source string, expectedMetadata map[string]interface{}) {
-		content := parse(t, source)
-		assert.Equal(t, content.Metadata, expectedMetadata)
+// Test for https://github.com/zk-org/zk/issues/574
+// Test that links inside footnotes are properly detected.
+func TestParseLinkInFootnote(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		expectedType  core.LinkType
+		expectedHrefs []string
+	}{
+		{
+			name:          "wiki link only in footnote",
+			source:        "Text[^1].\n\n[^1]: [[note1]]",
+			expectedType:  core.LinkTypeWikiLink,
+			expectedHrefs: []string{"note1"},
+		},
+		{
+			name:          "wiki link with surrounding text",
+			source:        "Text[^1].\n\n[^1]: See [[note1]] for details.",
+			expectedType:  core.LinkTypeWikiLink,
+			expectedHrefs: []string{"note1"},
+		},
+		{
+			name:          "multiple wiki links in footnote",
+			source:        "Text[^1].\n\n[^1]: See [[note1]] and [[note2]].",
+			expectedType:  core.LinkTypeWikiLink,
+			expectedHrefs: []string{"note1", "note2"},
+		},
+		{
+			name:          "markdown link in footnote",
+			source:        "Text[^1].\n\n[^1]: See [docs](readme.md).",
+			expectedType:  core.LinkTypeMarkdown,
+			expectedHrefs: []string{"readme.md"},
+		},
+		{
+			name:          "wiki link with title in footnote",
+			source:        "Text[^1].\n\n[^1]: [[note1|Note Title]]",
+			expectedType:  core.LinkTypeWikiLink,
+			expectedHrefs: []string{"note1"},
+		},
+		{
+			name:          "multiple footnotes with links",
+			source:        "A[^1] and B[^2].\n\n[^1]: [[note1]]\n[^2]: [[note2]]",
+			expectedType:  core.LinkTypeWikiLink,
+			expectedHrefs: []string{"note1", "note2"},
+		},
 	}
 
-	test("", map[string]interface{}{})
-	test("# A title", map[string]interface{}{})
-	test("---\n---\n# A title", map[string]interface{}{})
-	test(`---
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := parse(t, tt.source)
+			if len(content.Links) != len(tt.expectedHrefs) {
+				t.Errorf("expected %d links, got %d: %v", len(tt.expectedHrefs), len(content.Links), content.Links)
+				return
+			}
+			for i, link := range content.Links {
+				assert.Equal(t, link.Href, tt.expectedHrefs[i])
+				assert.Equal(t, link.Type, tt.expectedType)
+			}
+		})
+	}
+}
+
+func TestParseMetadataFromFrontmatter(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		expected map[string]any
+	}{
+		{
+			name:     "empty source",
+			source:   "",
+			expected: map[string]any{},
+		},
+		{
+			name:     "no metadata - title only",
+			source:   "# A title",
+			expected: map[string]any{},
+		},
+		{
+			name:     "empty frontmatter",
+			source:   "---\n---\n# A title",
+			expected: map[string]any{},
+		},
+		{
+			name: "frontmatter with title, tags and nested values",
+			source: `---
 title: A title
 tags:
   - tag1
@@ -616,13 +692,194 @@ nested:
 ---
 
 Paragraph
-`, map[string]interface{}{
-		"title": "A title",
-		"tags":  []interface{}{"tag1", "tag 2"},
-		"nested": map[string]interface{}{
-			"key": "value",
+`,
+			expected: map[string]any{
+				"title": "A title",
+				"tags":  []any{"tag1", "tag 2"},
+				"nested": map[string]any{
+					"key": "value",
+				},
+			},
 		},
-	})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := parse(t, tt.source)
+			assert.Equal(t, tt.expected, content.Metadata)
+		})
+	}
+}
+
+func TestParseLinksInFrontmatter(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		expected []core.Link
+	}{
+		{
+			name: "wikilink in quoted string",
+			source: `---
+key: "[[wikilink]]"
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "wikilink",
+					Href:         "wikilink",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "[[wikilink]]",
+					SnippetStart: 0,
+					SnippetEnd:   12,
+				},
+			},
+		},
+		{
+			name: "wikilink in list",
+			source: `
+---
+key:
+	- [[wikilink]]
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "wikilink",
+					Href:         "wikilink",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "key:\n\t- [[wikilink]]",
+					SnippetStart: 5,
+					SnippetEnd:   25,
+				},
+			},
+		},
+		{
+			name: "wikilink inside list brackets",
+			source: `
+---
+key: [ [[wiki link in a list]] ]
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "wiki link in a list",
+					Href:         "wiki link in a list",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "key: [ [[wiki link in a list]] ]",
+					SnippetStart: 5,
+					SnippetEnd:   37,
+				},
+			},
+		},
+		{
+			name: "markdown-style link",
+			source: `---
+key: "[markdown title](path.md)"
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "markdown title",
+					Href:         "path.md",
+					Type:         core.LinkTypeMarkdown,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "[markdown title](path.md)",
+					SnippetStart: 0,
+					SnippetEnd:   25,
+				},
+			},
+		},
+		{
+			name: "external link",
+			source: `---
+key: "https://www.foo.com"
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "https://www.foo.com",
+					Href:         "https://www.foo.com",
+					Type:         core.LinkTypeImplicit,
+					IsExternal:   true,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "https://www.foo.com",
+					SnippetStart: 0,
+					SnippetEnd:   19,
+				},
+			},
+		},
+		{
+			name: "wikilink with pipe title",
+			source: `---
+key: "[[link with | title]]"
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "title",
+					Href:         "link with",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "[[link with | title]]",
+					SnippetStart: 0,
+					SnippetEnd:   21,
+				},
+			},
+		},
+		{
+			name: "wikilink unquoted",
+			source: `---
+key: [[link without quotes]]
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "link without quotes",
+					Href:         "link without quotes",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "[[link without quotes]]",
+					SnippetStart: 0,
+					SnippetEnd:   23,
+				},
+			},
+		},
+		{
+			name: "wikilink inside quoted string",
+			source: `---
+key: "A [[link inside]] a string"
+---
+`,
+			expected: []core.Link{
+				{
+					Title:        "link inside",
+					Href:         "link inside",
+					Type:         core.LinkTypeWikiLink,
+					IsExternal:   false,
+					Rels:         []core.LinkRelation{},
+					Snippet:      "A [[link inside]] a string",
+					SnippetStart: 0,
+					SnippetEnd:   26,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := parse(t, tt.source)
+			assert.Equal(t, tt.expected, content.Links)
+		})
+	}
 }
 
 func parse(t *testing.T, source string) core.NoteContent {

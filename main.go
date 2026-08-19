@@ -16,14 +16,15 @@ import (
 	"github.com/zk-org/zk/internal/cli/cmd"
 	"github.com/zk-org/zk/internal/core"
 	executil "github.com/zk-org/zk/internal/util/exec"
+	"github.com/zk-org/zk/internal/util/paths"
 )
 
 var Version = "dev"
-var Build = "dev"
 
 var root struct {
-	Init  cmd.Init  `cmd group:"zk" help:"Create a new notebook in the given directory."`
-	Index cmd.Index `cmd group:"zk" help:"Index the notes to be searchable."`
+	Init   cmd.Init   `cmd group:"zk" help:"Create a new notebook in the given directory."`
+	Index  cmd.Index  `cmd group:"zk" help:"Index the notes to be searchable."`
+	Config cmd.Config `cmd group:"zk" help:"List configuration parameters."`
 
 	New   cmd.New   `cmd group:"notes" help:"Create a new note in the given notebook directory."`
 	List  cmd.List  `cmd group:"notes" help:"List notes matching the given criteria."`
@@ -149,10 +150,10 @@ func fatalIfError(err error) {
 }
 
 func setupDebugMode() {
-	c := make(chan os.Signal)
+	c := make(chan os.Signal, 1)
 	go func() {
 		stacktrace := make([]byte, 8192)
-		for _ = range c {
+		for range c {
 			length := runtime.Stack(stacktrace, true)
 			fmt.Fprintf(os.Stderr, "%s\n", string(stacktrace[:length]))
 			os.Exit(1)
@@ -181,7 +182,8 @@ func runAlias(container *cli.Container, args []string) (bool, error) {
 			cmdStr = `cd "` + notebook.Path + `" && ` + cmdStr
 		}
 
-		cmd := executil.CommandFromString(cmdStr, args[1:]...)
+		shell := executil.ResolveShell(container.Config.Tool.Shell)
+		cmd := executil.CommandFromString(shell, cmdStr, args[1:]...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -306,7 +308,11 @@ func parseDirs(args []string) (cli.Dirs, []string, error) {
 			}
 
 			if option != "" && value != "" {
-				path, err := filepath.Abs(value)
+				valueAbs, err := paths.ExpandPath(value)
+				if err != nil {
+					return "", newArgs, err
+				}
+				path, err := filepath.Abs(valueAbs)
 				return path, newArgs, err
 			} else if option != "" && value == "" {
 				return "", newArgs, errors.New(option + " requires a path argument")

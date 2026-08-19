@@ -40,6 +40,10 @@ type NoteFindOpts struct {
 	Orphan bool
 	// Filter to select notes having no tags.
 	Tagless bool
+	// Filter to select notes with at least one missing backlink.
+	MissingBacklink bool
+	// Filter to select notes with at least one broken internal link.
+	BrokenLinks bool
 	// Filter notes created after the given date.
 	CreatedStart *time.Time
 	// Filter notes created before the given date.

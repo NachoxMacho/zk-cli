@@ -1,15 +1,15 @@
 package lsp
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
-	"github.com/zk-org/zk/internal/core"
-	dateutil "github.com/zk-org/zk/internal/util/date"
-	"github.com/zk-org/zk/internal/util/errors"
-	"github.com/zk-org/zk/internal/util/opt"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+	"github.com/zk-org/zk/internal/core"
+	dateutil "github.com/zk-org/zk/internal/util/date"
+	"github.com/zk-org/zk/internal/util/opt"
 )
 
 const cmdNew = "zk.new"
@@ -24,26 +24,27 @@ type cmdNewOpts struct {
 	Date                    string             `json:"date"`
 	Edit                    jsonBoolean        `json:"edit"`
 	DryRun                  jsonBoolean        `json:"dryRun"`
+	Append                  bool               `json:"append"`
 	InsertLinkAtLocation    *protocol.Location `json:"insertLinkAtLocation"`
 	InsertContentAtLocation *protocol.Location `json:"insertContentAtLocation"`
 }
 
-func executeCommandNew(notebook *core.Notebook, documents *documentStore, context *glsp.Context, args []interface{}) (interface{}, error) {
+func executeCommandNew(notebook *core.Notebook, documents *documentStore, context *glsp.Context, args []any) (any, error) {
 	var opts cmdNewOpts
 	if len(args) > 1 {
-		arg, ok := args[1].(map[string]interface{})
+		arg, ok := args[1].(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%s expects a dictionary of options as second argument, got: %v", cmdNew, args[1])
 		}
 		err := unmarshalJSON(arg, &opts)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse %s args, got: %v", cmdNew, arg)
+			return nil, fmt.Errorf("failed to parse %s args, got: %v: %w", cmdNew, arg, err)
 		}
 	}
 
 	date, err := dateutil.TimeFromNatural(opts.Date)
 	if err != nil {
-		return nil, errors.Wrapf(err, "%s, failed to parse the `date` option", opts.Date)
+		return nil, fmt.Errorf("%s, failed to parse the `date` option: %w", opts.Date, err)
 	}
 
 	note, err := notebook.NewNote(core.NewNoteOpts{
@@ -83,18 +84,31 @@ func executeCommandNew(notebook *core.Notebook, documents *documentStore, contex
 	}
 
 	if !opts.DryRun && opts.InsertLinkAtLocation != nil {
-        minNote := note.AsMinimalNote()
+		minNote := note.AsMinimalNote()
 
-        info := &linkInfo{
-            note: &minNote,
-            location: opts.InsertLinkAtLocation,
-            title: &opts.Title,
-        }
-        err := linkNote(notebook, documents, context, info)
+		var prefix string
+		// Inserts link inline after selected text.
+		if opts.Append {
+			r := opts.InsertLinkAtLocation.Range
+			opts.InsertLinkAtLocation.Range = protocol.Range{
+				Start: r.End,
+				End:   r.End,
+			}
+			// Seperate last selected character and link with a space.
+			prefix = " "
+		}
 
-        if err != nil {
-            return nil, err
-        }
+		info := &linkInfo{
+			note:     &minNote,
+			location: opts.InsertLinkAtLocation,
+			title:    &opts.Title,
+			prefix:   prefix,
+		}
+		err := linkNote(notebook, documents, context, info)
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	absPath := filepath.Join(notebook.Path, note.Path)
@@ -105,7 +119,7 @@ func executeCommandNew(notebook *core.Notebook, documents *documentStore, contex
 		}, nil)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"path":    absPath,
 		"content": note.RawContent,
 	}, nil
